@@ -28,7 +28,8 @@ import Message (Message(NewSearch, NextPage, LastPage))
 import HTMLParser (parseString)
 
 main = do 
-    print $ parseString "<!DOCTYPE html><input id=\"asdf\"></input>"
+    print "start"
+    print $ parseString "<!DOCTYPE html><a>a</a>"
     -- key <- lookupEnv "GOOGLE_API_KEY"
     -- let apiKey = fromJust key
     -- args <- getArgs
