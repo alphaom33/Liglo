@@ -1,5 +1,6 @@
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE TupleSections #-}
+{-# LANGUAGE TemplateHaskell #-}
 
 module HTMLParser where
 
@@ -7,6 +8,12 @@ import Control.Applicative
 import Control.Monad (join)
 import Control.Monad.Cont (MonadIO(liftIO))
 import Debug.Trace (trace)
+import Control.Monad.Fix (fix)
+import Data.Either (fromRight, isRight)
+
+import Lens.Micro.Mtl ((.=), (%=), use, view)
+import Lens.Micro.TH (makeLenses)
+import Lens.Micro (set, (^.))
 
 satisfy :: (Char -> Bool) -> Parser Char
 satisfy f = P $ \case
@@ -18,6 +25,11 @@ try :: Parser a -> Parser a
 try (P f) = P $ \stream0 -> case f stream0 of
   (_      , Left err) -> (stream0, Left err)
   (stream1, Right a ) -> (stream1, Right a )
+
+consumeUntil :: Parser a -> Parser a
+consumeUntil (P f) = P $ fix $ \me stream -> case f stream of
+    (_, Left err) -> me (drop 1 stream)
+    (rest, Right a) -> (rest, Right a)
 
 orElse :: Parser a -> Parser a -> Parser a
 orElse (P f1) (P f2) = P $ \stream0 -> case f1 stream0 of
@@ -67,19 +79,18 @@ someParser (P f) = P $ \stream -> case f stream of
       (stream'', Right as) -> (stream'', Right (a:as))
 
 data Tag = Tag {
-    name :: String,
-    children :: [Tag],
-    text :: String
-} deriving Show
+    _name :: String,
+    _children :: [Tag],
+    _text :: String
+} deriving (Show)
+$(makeLenses ''Tag)
 
 char :: Char -> Parser Char
 char c = satisfy (== c)
 
-dropFirstAndLast _ a _ = a
-dropFirstsAndLast _ _ a _ = a
-
 parens :: Parser a -> Parser a
 parens parseA = dropFirstAndLast <$> char '(' <*> parseA <*> char ')'
+    where dropFirstAndLast _ a _ = a
 
 alpha :: Parser Char
 alpha = satisfy (`elem` "abcdefghijklmnopqrstuvqwxyz")
@@ -96,35 +107,90 @@ consume = satisfy $ const True
 identifier :: Parser String
 identifier = (:) <$> alpha <*> manyParser alphanumeric
 
-matchIdentifier :: String -> Parser String
-matchIdentifier = foldr (\ c -> (<*>) ((:) <$> char c)) (pure [])
+matchString :: String -> Parser String
+matchString = foldr (\ c -> (<*>) ((:) <$> char c)) (pure [])
+
+skipWhitespace :: Parser String
+skipWhitespace = manyParser $ char ' '
+
+string :: Parser String
+string = (++) <$> ((:) <$> char '"' <*> manyParser (satisfy (/= '"'))) <*> matchString "\""
+
+ack :: [Parser String] -> Parser String
+ack [p] = p
+ack (p:ps) = (++) <$> p <*> ack ps
+
+skipSetters = manyParser $ ack [skipWhitespace, identifier, skipWhitespace, matchString "=", skipWhitespace, string]
 
 startTag :: Parser String
-startTag = dropFirstAndLast <$> char '<' <*> identifier <*> char '>'
+startTag = dropFirstAndLasts <$> char '<' <*> identifier <*> skipSetters <*> char '>'
+    where dropFirstAndLasts _ a _ _ = a
 
 endTag :: String -> Parser String
-endTag identifier = dropFirstsAndLast <$> char '<' <*> char '/' <*> matchIdentifier identifier <*> char '>'
+endTag identifier = dropFirstsAndLast <$> char '<' <*> char '/' <*> matchString identifier <*> char '>'
+    where dropFirstsAndLast _ _ a _ = a
 
-finishTag :: String -> (String, String, [Tag])
-finishTag toFinish = do
-    let (rest, Right text) = parse (manyParser $ satisfy (/= '<')) toFinish
-    let (rest', name) = parse (try startTag) rest
-    case name of
-        Right e -> do
-            let (rest'', child) = parseTag e rest'
-            let (rest''', texts, childs) = finishTag rest''
-            (rest''', text ++ texts, child:childs)
-        Left _ -> (rest', text, [])
 
-parseTag :: String -> String -> (String, Tag)
-parseTag name string = do
-    let (rest, text, children) = finishTag string
-    let (rest', result) = parse (endTag name) rest
-    case result of
-        Right _ -> (rest', Tag {name=name, children=children, text=text})
-        Left e -> (rest', Tag {name="err", children=[], text=e})
+comment :: Parser String
+comment = (++) <$> matchString "<!--" <*> consumeUntil (matchString "-->")
+
+-- finishTag :: String -> (String, String, [Tag])
+-- finishTag toFinish = do
+--     let (rest, text) = parse (manyParser $ satisfy (/= '<')) $ parseComment toFinish
+--     let text' = fromRight "" text
+--     let (rest', name) = parse (try startTag) $ parseComment rest
+--     case name of
+--         Right e -> do
+--             let (rest'', child) = parseTag e $ parseComment rest'
+--             let (rest''', texts, childs) = finishTag $ parseComment rest''
+--             (rest''', text' ++ texts, child:childs)
+--         Left _ -> (rest', text', [])
+
+checkText :: String -> Tag -> (String, Tag, Bool)
+checkText toCheck current =
+    let
+        (rest, result) = parse (someParser $ satisfy (/= '<')) toCheck
+    in
+        case result of
+            Right a -> (rest,  set text (view text current ++ a) current, True)
+            Left _ -> (toCheck, current, False)
+
+checkTag :: String -> Tag -> (String, Tag, Bool)
+checkTag toCheck current =
+    let
+        (rest, result) = parse startTag toCheck
+    in
+        case result of
+            Right a -> let (rest', tag) = parseTag toCheck in (rest', set children (tag : view children current) current, True)
+            Left _ -> (toCheck, current, False)
+
+checkComment :: String -> Tag -> (String, Tag, Bool)
+checkComment toCheck current = 
+    let 
+        (rest, result) = parse (try comment) toCheck
+    in
+        (rest, current, isRight result)
+
+parseBody :: String -> Tag -> (String, Tag)
+parseBody rest tag = do
+    let (rest', tag', textSucceeded) = checkText rest tag
+    let (rest'', tag'', commentSucceeded) = checkTag rest' tag'
+    let (rest''', tag''', startSucceeded) = checkComment rest'' tag''
+    if textSucceeded || commentSucceeded || startSucceeded then
+        parseBody (trace rest''' rest''') tag'''
+    else
+        (rest, tag)
+
+parseTag :: String -> (String, Tag)
+parseTag toParse = do
+    let (rest, _name) = parse startTag toParse
+    let name = fromRight "" _name
+    let (rest', tag) = parseBody rest Tag {_name=name, _children=[], _text=""}
+    let (rest'', _) = parse (endTag name) rest'
+    (rest'', tag)
+
+parseConsume toConsume string = fst $ parse (matchString toConsume) string
 
 parseString :: String -> (String, Tag)
 parseString string = do
-    let (rest, Right name) = parse startTag string
-    parseTag name rest
+    parseTag $ parseConsume "<!DOCTYPE html>" string
