@@ -16,11 +16,12 @@ import Brick.Focus (focusRingCursor)
 import Brick.Forms (Form(formFocus, formState), handleFormEvent)
 import Lens.Micro.Extras (view)
 import Control.Monad (join)
-import Data.Text (Text, unpack)
+import Data.Text (Text)
 import qualified Brick.BChan as B
 import Graphics.Vty.CrossPlatform (mkVty)
 import Graphics.Vty (defaultConfig)
 import Brick.BChan (readBChan, writeBChan)
+import Data.ByteString.Lazy.Char8 (unpack)
 
 import SearchApp
 import Network
@@ -28,8 +29,10 @@ import Message (Message(NewSearch, NextPage, LastPage))
 import HTMLParser (parseString)
 
 main = do 
-    print "start"
-    print $ parseString "<!DOCTYPE html><a>a</a>"
+    a <- parseRequest "https://hackage.haskell.org/package/bytestring-0.12.2.0/docs/Data-ByteString-Char8.html#v:unpack"
+    b <- httpLBS a
+    let asdf = unpack (getResponseBody b)
+    print $ parseString asdf
     -- key <- lookupEnv "GOOGLE_API_KEY"
     -- let apiKey = fromJust key
     -- args <- getArgs

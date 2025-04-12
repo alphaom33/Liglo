@@ -96,13 +96,13 @@ parens parseA = dropFirstAndLast <$> char '(' <*> parseA <*> char ')'
     where dropFirstAndLast _ a _ = a
 
 alpha :: Parser Char
-alpha = satisfy (`elem` "abcdefghijklmnopqrstuvqwxyz")
+alpha = satisfy (`elem` "abcdefghijklmnopqrstuvqwxyz-")
 
 numeric :: Parser Char
 numeric = satisfy (`elem` "0123456789")
 
 alphanumeric :: Parser Char
-alphanumeric = satisfy (`elem` "abcdefghijklmnopqrstuvqwxyz0123456789")
+alphanumeric = alpha <|> numeric
 
 consume :: Parser Char
 consume = satisfy $ const True
@@ -114,7 +114,7 @@ matchString :: String -> Parser String
 matchString = foldr (\ c -> (<*>) ((:) <$> char c)) (pure [])
 
 skipWhitespace :: Parser String
-skipWhitespace = manyParser $ char ' ' -- <|> char '\n'
+skipWhitespace = manyParser $ char ' ' <|> char '\n'
 
 string :: Parser String
 string = (++) <$> ((:) <$> char '"' <*> manyParser (satisfy (/= '"'))) <*> matchString "\""
@@ -128,8 +128,8 @@ skipSetters :: Parser [String]
 skipSetters = manyParser $ ack [skipWhitespace, identifier, skipWhitespace, matchString "=", skipWhitespace, string]
 
 startTag :: Parser String
-startTag = dropFirstAndLasts <$> char '<' <*> identifier <*> skipSetters <*> char '>'
-    where dropFirstAndLasts _ a _ _ = a
+startTag = dropFirstAndLasts <$> char '<' <*> identifier <*> skipSetters <*> skipWhitespace <*> char '>'
+    where dropFirstAndLasts _ a _ _ _ = a
 
 middleTag :: Parser String
 middleTag = dropFirstsAndLastss <$> char '<' <*> identifier <*> skipSetters <*> skipWhitespace <*> char '/' <*> char '>'
@@ -192,9 +192,9 @@ parseTag toParse = do
     let (rest'', _) = parse (endTag tagName) rest'
     (rest'', tag)
 
-parseConsume :: String -> String -> String
-parseConsume consumeSchema toConsume = fst $ parse (matchString consumeSchema) toConsume
+killDoctype :: Parser [Char]
+killDoctype = (++) <$>  matchString "<!DOCTYPE html" <*> consumeUntil (matchString ">")
 
 parseString :: String -> (String, Tag)
 parseString toParse = do 
-    parseTag $ fst $ parse (manyParser middleTag) $ parseConsume "<!DOCTYPE html>" toParse
+    parseTag $ fst $ parse ((:) <$> killDoctype <*> manyParser middleTag) toParse
