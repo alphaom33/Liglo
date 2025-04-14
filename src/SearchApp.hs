@@ -155,11 +155,11 @@ handleEvent event = do
         (True, V.EvKey (V.KChar 'k') []) -> moveCursor (subtract 1)
         (True, V.EvKey (V.KChar 'h') []) -> movePage (subtract 1)
         (True, V.EvKey (V.KChar 'l') []) -> movePage (+ 1)
-        -- (True, V.EvKey V.KEnter []) -> do
-        --     curPos <- use cursorPos
-        --     mytems <- use mytems
-        --     message .= EnterSite (link (mytems!!curPos))
-        --     halt
+        (True, V.EvKey V.KEnter []) -> do
+            curPos <- use cursorPos
+            mytems <- use mytems
+            curQuery .= link (mytems!!curPos)
+            halt
 
         (False, V.EvKey V.KEnter []) -> do
             canMove .= True

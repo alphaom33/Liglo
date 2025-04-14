@@ -1,2 +1,2 @@
 #!/bin/bash
-cabal new-run Readle $1 --ghc-options="-threaded"
+cabal new-run Readle "$*" --ghc-options="-threaded"

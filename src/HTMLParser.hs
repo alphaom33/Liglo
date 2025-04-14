@@ -13,6 +13,7 @@ import Data.Either (fromRight, isRight, fromLeft)
 import Lens.Micro.Mtl (view)
 import Lens.Micro.TH (makeLenses)
 import Lens.Micro (set)
+import Data.Char (toUpper, toLower)
 
 tracer :: Show a => a -> a
 tracer a = trace (show a) a
@@ -109,7 +110,7 @@ parens parseA = dropFirstAndLast <$> char '(' <*> parseA <*> char ')'
     where dropFirstAndLast _ a _ = a
 
 alpha :: Parser Char
-alpha = satisfy (`elem` "abcdefghijklmnopqrstuvqwxyz-")
+alpha = satisfy (`elem` "ABCDEFGHIJKLMNOPQRSTUVQWXYZabcdefghijklmnopqrstuvqwxyz-")
 
 numeric :: Parser Char
 numeric = satisfy (`elem` "0123456789")
@@ -125,6 +126,9 @@ identifier = someParser alphanumeric
 
 matchString :: String -> Parser String
 matchString = foldr (\ c -> (<*>) ((:) <$> char c)) (pure [])
+
+matchStringIgnoreCase :: String -> Parser String
+matchStringIgnoreCase = foldr (\ c -> (<*>) ((:) <$> (char (toLower c) <||> char (toUpper c)))) (pure [])
 
 whiteSpace :: Parser Char
 whiteSpace = char ' ' <||> char '\n' <||> char '\t'
@@ -206,6 +210,12 @@ parseTag :: Parser Tag
 parseTag = P $ \ cs -> do
     let (P doStartTag) = startTag
     case doStartTag cs of
+        (rest, Right "script") -> do
+            let (P doEndTag) = try $ consumeUntil $ endTag "script"
+            (fst $ doEndTag rest, Right Tag {_name="", _children=[]})
+        (rest, Right "style") -> do
+            let (P doEndTag) = try $ consumeUntil $ endTag "style"
+            (fst $ doEndTag rest, Right Tag {_name="", _children=[]})
         (rest, Right tagName) ->
             let
                 (P doTagBody) = tagBody Tag {_name=tagName, _children=[]}
@@ -218,7 +228,7 @@ parseTag = P $ \ cs -> do
         (rest, Left a) -> (rest, Left a)
 
 killDoctype :: Parser [Char]
-killDoctype = (++) <$>  matchString "<!DOCTYPE html" <*> consumeUntil (matchString ">")
+killDoctype = (++) <$>  matchStringIgnoreCase "<!DOCTYPE html" <*> consumeUntil (matchString ">")
 
 parseString :: String -> (String, Either Error Tag)
 parseString = parse (drops <$> killDoctype <*> manyParser (middleTag <||> ((:) <$> whiteSpace <*> pure []) <||> comment) <*> parseTag)
