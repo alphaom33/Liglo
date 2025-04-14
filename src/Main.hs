@@ -27,14 +27,16 @@ import SearchApp
 import Network
 import Message (Message(NewSearch, NextPage, LastPage))
 import HTMLParser (parseString)
+import Data.Either (fromRight)
 
-main = do 
+main = do
     a <- parseRequest "https://hackage.haskell.org/package/bytestring-0.12.2.0/docs/Data-ByteString-Char8.html#v:unpack"
     b <- httpLBS a
     let asdf = unpack (getResponseBody b)
-    print $ parseString asdf
-    -- key <- lookupEnv "GOOGLE_API_KEY"
-    -- let apiKey = fromJust key
-    -- args <- getArgs
-    -- finalState <- defaultMain app $ initialState apiKey (head args)
-    -- print finalState
+    writeFile "asdf.html" $ show $ fromRight HTMLParser.Tag {} $ snd $ parseString asdf
+
+
+
+
+
+    -- key <- lookupEnv "GOOGLE_API_KEY" let apiKey = fromJust key args <- getArgs finalState <- defaultMain app $ initialState apiKey (head args) print finalState

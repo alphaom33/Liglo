@@ -21,7 +21,7 @@ satisfy :: (Char -> Bool) -> Parser Char
 satisfy f = P $ \case
   []                 -> ([], Left "end of stream")
   (c:cs) | f c       -> (cs, Right c)
-         | otherwise -> (cs, Left "did not satisfy")
+         | otherwise -> (cs, Left $ show c ++ "did not satisfy")
 
 try :: Parser a -> Parser a
 try (P f) = P $ \stream0 -> case f stream0 of
@@ -38,6 +38,10 @@ orElse :: Parser a -> Parser a -> Parser a
 orElse (P f1) (P f2) = P $ \stream0 -> case f1 stream0 of
   (stream1, Left _) -> f2 stream1
   (stream1, Right a ) -> (stream1, Right a)
+
+tryElse, (<||>) :: Parser a -> Parser a -> Parser a
+tryElse f1 f2 = try f1 <|> try f2
+(<||>) = tryElse
 
 type Error = String
 newtype Parser a = P { parse :: String -> (String, Either Error a) }
@@ -81,12 +85,21 @@ someParser (P f) = P $ \stream -> case f stream of
       (stream'', Left err) -> (stream'', Left err)
       (stream'', Right as) -> (stream'', Right (a:as))
 
+
+data Child = ChildTag Tag | ChildText String
+
+instance Show Child where
+    show (ChildTag a) = show a
+    show (ChildText a) = a ++ "\n"
+
 data Tag = Tag {
     _name :: String,
-    _children :: [Tag],
-    _text :: String
-} deriving (Show)
+    _children :: [Child]
+}
+instance Show Tag where
+    show (Tag name children) = "<" ++ name ++ ">\n" ++ concatMap show (reverse children) ++ "</" ++ name ++ ">\n"
 $(makeLenses ''Tag)
+
 
 char :: Char -> Parser Char
 char c = satisfy (== c)
@@ -102,19 +115,22 @@ numeric :: Parser Char
 numeric = satisfy (`elem` "0123456789")
 
 alphanumeric :: Parser Char
-alphanumeric = alpha <|> numeric
+alphanumeric = alpha <||> numeric
 
 consume :: Parser Char
 consume = satisfy $ const True
 
 identifier :: Parser String
-identifier = (:) <$> alpha <*> manyParser alphanumeric
+identifier = someParser alphanumeric
 
 matchString :: String -> Parser String
 matchString = foldr (\ c -> (<*>) ((:) <$> char c)) (pure [])
 
+whiteSpace :: Parser Char
+whiteSpace = char ' ' <||> char '\n' <||> char '\t'
+
 skipWhitespace :: Parser String
-skipWhitespace = manyParser $ char ' ' <|> char '\n'
+skipWhitespace = manyParser whiteSpace
 
 string :: Parser String
 string = (++) <$> ((:) <$> char '"' <*> manyParser (satisfy (/= '"'))) <*> matchString "\""
@@ -143,58 +159,67 @@ endTag tagName = dropFirstsAndLast <$> char '<' <*> char '/' <*> matchString tag
 comment :: Parser String
 comment = (++) <$> matchString "<!--" <*> consumeUntil (matchString "-->")
 
-checkText :: String -> Tag -> (String, Tag, Bool)
-checkText toCheck current =
+checkText :: Tag -> Parser Tag
+checkText current = P $ \ cs ->
     let
-        (rest, result) = parse (someParser $ satisfy (/= '<')) toCheck
+        (P doUntilLT) = someParser $ satisfy (/= '<')
     in
-        case result of
-            Right a -> (rest,  set text (view text current ++ a) current, True)
-            Left _ -> (toCheck, current, False)
+        case doUntilLT cs of
+            (rest, Right a) -> (rest,  Right $ set children (ChildText a : view children current) current)
+            (rest, Left _) -> (rest, Left "noCheckText")
 
-checkTag :: String -> Tag -> (String, Tag, Bool)
-checkTag toCheck current =
-    let (_, result) = parse startTag toCheck
-    in case result of
-        Right _ -> let (rest', tag) = parseTag toCheck in (rest', set children (tag : view children current) current, True)
-        Left _ -> (toCheck, current, False)
+checkTag :: Tag -> Parser Tag
+checkTag current = P $ \ cs ->
+    let
+        (P doStartTag) = startTag
+        (P doParseTag) = parseTag
+    in case doStartTag cs of
+        (_, Right _) -> case doParseTag cs of
+            (rest, Right c) -> (rest, Right $ set children (ChildTag c : view children current) current)
+            (rest, Left e) -> (rest, Left e)
+        (rest, Left e) -> (rest, Left $ "noCheckTag " ++ e)
 
-checkComment :: String -> Tag -> (String, Tag, Bool)
-checkComment toCheck current = 
-    let (rest, result) = parse (try comment) toCheck
-    in (rest, current, isRight result)
-
-checkMiddle :: String -> Tag -> (String, Tag, Bool)
-checkMiddle toCheck current = 
-    let (rest, result) = parse (try (someParser middleTag)) toCheck
-    in (rest, current, isRight result)
+eatTagged :: Parser a -> Tag -> Parser Tag
+eatTagged toEat current = P $ \ cs ->
+    let (P doToEat) = toEat
+    in case doToEat cs of
+        (rest, Right _) -> (rest, Right current)
+        (rest, Left e) -> (rest, Left $ "eatTagged failed " ++ e)
 
 switchGive :: [String -> Tag -> (String, Tag, Bool)] -> String -> Tag -> [Bool] -> (String, Tag, Bool)
 switchGive [] rest tag successes = (rest, tag, or successes)
-switchGive (toDo:toDos) rest tag successes = 
+switchGive (toDo:toDos) rest tag successes =
     let (rest', tag', succeeded) = toDo rest tag
     in switchGive toDos rest' tag' (succeeded:successes)
 
 
-parseBody :: String -> Tag -> (String, Tag)
-parseBody rest tag = do
-    let (rest', tag', succeeded) = switchGive [checkText, checkTag, checkComment, checkMiddle] rest tag []
-    if succeeded then
-        parseBody rest' tag'
-    else
-        (rest, tag)
+tagBody :: Tag -> Parser Tag
+tagBody tag = P $ \ cs -> do
+    let (P doChecks) = try $ checkText tag <||> checkTag tag <||> eatTagged comment tag <||> eatTagged middleTag tag
+    case doChecks cs of
+        (rest, Right a) ->
+            let (P doParseBody) = tagBody a
+            in doParseBody rest
+        (rest, Left _) -> (rest, Right tag)
 
-parseTag :: String -> (String, Tag)
-parseTag toParse = do
-    let (rest, _tagName) = parse startTag toParse
-    let tagName = fromRight "" _tagName
-    let (rest', tag) = parseBody rest Tag {_name=tagName, _children=[], _text=""}
-    let (rest'', _) = parse (endTag tagName) rest'
-    (rest'', tag)
+parseTag :: Parser Tag
+parseTag = P $ \ cs -> do
+    let (P doStartTag) = startTag
+    case doStartTag cs of
+        (rest, Right tagName) ->
+            let
+                (P doTagBody) = tagBody Tag {_name=tagName, _children=[]}
+                (P doEndTag) = try $ endTag tagName
+                (rest', result) = doTagBody rest
+            in
+                case doEndTag rest' of
+                    (rest'', Right _) -> (rest'', result)
+                    (rest'', Left _) -> (rest'', result)
+        (rest, Left a) -> (rest, Left a)
 
 killDoctype :: Parser [Char]
 killDoctype = (++) <$>  matchString "<!DOCTYPE html" <*> consumeUntil (matchString ">")
 
-parseString :: String -> (String, Tag)
-parseString toParse = do 
-    parseTag $ fst $ parse ((:) <$> killDoctype <*> manyParser middleTag) toParse
+parseString :: String -> (String, Either Error Tag)
+parseString = parse (drops <$> killDoctype <*> manyParser (middleTag <||> ((:) <$> whiteSpace <*> pure []) <||> comment) <*> parseTag)
+    where drops _ _ a = a
