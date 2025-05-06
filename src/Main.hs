@@ -29,30 +29,31 @@ import Message (Message(NewSearch, NextPage, LastPage))
 import HTMLParser (parseString)
 import Data.Either (fromRight)
 
-texxtify :: HTMLParser.Child -> String
-texxtify (HTMLParser.ChildTag a) = textify a
-texxtify (HTMLParser.ChildText a) = filter (/= '\n') a
+-- texxtify :: HTMLParser.Child -> String
+-- texxtify (HTMLParser.ChildTag a) = textify a
+-- texxtify (HTMLParser.ChildText a) = filter (/= '\n') a
 
-textify :: HTMLParser.Tag -> String
-textify (HTMLParser.Tag "head" children) = ""
-textify (HTMLParser.Tag "p" children) = concatMap texxtify (reverse children) ++ "\n"
-textify (HTMLParser.Tag "li" children) = concatMap texxtify (reverse children) ++ "\n"
-textify (HTMLParser.Tag "tr" children) = concatMap texxtify (reverse children) ++ "\n"
-textify (HTMLParser.Tag "th" children) = concatMap texxtify (reverse children) ++ " "
-textify (HTMLParser.Tag "td" children)  = concatMap texxtify (reverse children) ++ " "
-textify (HTMLParser.Tag _ children) = concatMap texxtify (reverse children)
+-- textify :: HTMLParser.Tag -> String
+-- textify (HTMLParser.Tag "head" children) = ""
+-- textify (HTMLParser.Tag "p" children) = concatMap texxtify (reverse children) ++ "\n"
+-- textify (HTMLParser.Tag "li" children) = concatMap texxtify (reverse children) ++ "\n"
+-- textify (HTMLParser.Tag "tr" children) = concatMap texxtify (reverse children) ++ "\n"
+-- textify (HTMLParser.Tag "th" children) = concatMap texxtify (reverse children) ++ " "
+-- textify (HTMLParser.Tag "td" children)  = concatMap texxtify (reverse children) ++ " "
+-- textify (HTMLParser.Tag _ children) = concatMap texxtify (reverse children)
 
 main = do
-    args <- getArgs 
-    let arged = gsubRegexPR " " "+" $ concat args
-    key <- lookupEnv "GOOGLE_API_KEY" 
-    let apiKey = fromJust key 
-    finalState <- defaultMain app $ initialState apiKey (head args) 
+    print $ parseString "\"asdf'\""
+    -- args <- getArgs 
+    -- let arged = gsubRegexPR " " "+" $ concat args
+    -- key <- lookupEnv "GOOGLE_API_KEY" 
+    -- let apiKey = fromJust key 
+    -- finalState <- defaultMain app $ initialState apiKey (head args) 
 
-    a <- parseRequest $ _curQuery finalState
-    b <- httpLBS a
-    let asdf = unpack (getResponseBody b)
+    -- a <- parseRequest $ _curQuery finalState
+    -- b <- httpLBS a
+    -- let asdf = unpack (getResponseBody b)
 
-    let result = parseString asdf
-    print result
-    writeFile "asdf.html" $ textify $ fromRight HTMLParser.Tag {} $ snd $ result
+    -- let result = parseString asdf
+    -- print result
+    -- writeFile "asdf.html" $ textify $ fromRight HTMLParser.Tag {} $ snd $ result
