@@ -9,7 +9,6 @@ module HTMLParser where
 import Control.Applicative (Alternative, empty, many, some, (<|>))
 import Debug.Trace (trace)
 import Control.Monad.Fix (fix)
-import Data.Either (fromRight, isRight, fromLeft)
 
 import Lens.Micro.Mtl (view)
 import Lens.Micro.TH (makeLenses)
@@ -29,6 +28,11 @@ try :: Parser a -> Parser a
 try (P f) = P $ \stream0 -> case f stream0 of
   (_      , Left err) -> (stream0, Left err)
   (stream1, Right a ) -> (stream1, Right a )
+
+whoCares :: Parser a -> Parser b -> Parser b
+whoCares (P f) (P f1) = P $ \stream0 -> case f stream0 of
+  (_      , Left _) -> f1 stream0
+  (stream1, Right _) -> f1 stream1
 
 consumeUntil :: Parser a -> Parser a
 consumeUntil (P f) = P $ fix $ \me stream -> case f stream of
@@ -87,9 +91,18 @@ someParser (P f) = P $ \stream -> case f stream of
       (stream'', Left err) -> (stream'', Left err)
       (stream'', Right as) -> (stream'', Right (a:as))
 
-matchThrough :: Char -> Parser String
-matchThrough c = dropLast <$> manyParser (notChar c) <*> char c
-    where dropLast a _ = a
+doSequentialString :: [Parser String] -> Parser String
+doSequentialString ffs = foldr (\ a -> (<*>) ((++) <$> a)) (pure []) ffs
+
+dropLast :: [String] -> String -> String
+dropLast a _ = foldl (++) "" a
+
+matchThrough :: String -> Parser String
+matchThrough str = P $ fix $ \ me stream ->
+  let (P doMatch) = matchString str
+  in case doMatch stream of
+    (stream', Right a) -> (stream', Right a)
+    (_, Left _) -> me $ tail stream
 
 discardDels :: a -> b -> c -> b
 discardDels _ a _ = a
@@ -106,6 +119,9 @@ charIgnoreCase c = char (toLower c) <||> char (toUpper c)
 matchString :: String -> Parser String
 matchString = foldr (\ c -> (<*>) ((:) <$> char c)) (pure [])
 
+matchNotString :: String -> Parser String
+matchNotString = foldr (\ c -> (<*>) ((:) <$> notChar c)) (pure [])
+
 matchStringIgnoreCase :: String -> Parser String
 matchStringIgnoreCase = foldr (\ c -> (<*>) ((:) <$> charIgnoreCase c)) (pure [])
 
@@ -118,7 +134,7 @@ checkDels stream (del:dels) =
     let
         (P op) = char del
     in case op stream of
-        (_, Left err) -> checkDels stream dels
+        (_, Left _) -> checkDels stream dels
         (stream', Right _) -> (stream', Right (del:[]))
 
 string :: Parser String
@@ -126,34 +142,172 @@ string = P $ \stream ->
     let
         dels = "'\""
     in case checkDels stream dels of
-        (stream', Right del) -> let (P end) = matchThrough (del!!0) in end stream'
+        (stream', Right del) -> let (P end) = matchThrough del in end stream'
         (stream', Left err) -> (stream', Left $ err ++ dels)
 
-data Attribute = Attribute (String, String) deriving Show
+data Attribute = Attribute (String, String) deriving (Show, Eq)
 
-attribute :: Parser Attribute
-attribute = P $ \cs -> (cs, Right $ Attribute ("", ""))
+data TagType = 
+  Select |
+  Template |
+  Table |
+  TD |
+  TH |
+  TR |
+  TBody |
+  THead |
+  TFoot |
+  Caption |
+  Colgroup |
+  Head |
+  Body |
+  FrameSet |
+  Html |
+  External |
+  Area |
+  Base |
+  BR |
+  Col |
+  Embed |
+  HR |
+  IMG |
+  Input |
+  Link |
+  Meta |
+  Source |
+  Track |
+  WBR |
+  Script |
+  Style |
+  TextArea |
+  Title |
+  SVG |
+  TestType deriving (Show, Eq)
 
-data TagType = Select | Template | Table | TD | TH | TR | TBody | THead | TFoot | Caption | Colgroup | Head | Body | FrameSet | Html | External | TestType deriving Show
+data ElementKind = Void | TheTemplate | RawText | EscapableText | Foreign | Normal deriving (Show, Eq)
 
 data Tag = Tag {
     tagType :: TagType
     , attrs :: [Attribute]
-} deriving Show
+    , selfClosing :: Bool
+} deriving (Show, Eq)
+
+getTagKind :: TagType -> ElementKind
+getTagKind tagType = case tagType of
+  Area -> Void
+  Base -> Void
+  BR -> Void
+  Col -> Void
+  Embed -> Void
+  HR -> Void
+  IMG -> Void
+  Input -> Void
+  Link -> Void
+  Meta -> Void
+  Source -> Void
+  Track -> Void
+  WBR -> Void
+  Template -> TheTemplate
+  Script -> RawText
+  Style -> RawText
+  TextArea -> EscapableText
+  Title -> EscapableText
+  SVG -> Foreign
+  _ -> Normal
 
 strToType :: String -> TagType
-strToType str = case str of 
-    "select" -> Select
-    _ -> External
+strToType str = case map toLower str of
+  "select" -> Select
+  "template" -> Template
+  "table" -> Table
+  "td" -> TD
+  "th" -> TH
+  "tr" -> TR
+  "tbody" -> TBody
+  "thead" -> THead
+  "tfoot" -> TFoot
+  "caption" -> Caption
+  "colgroup" -> Colgroup
+  "head" -> Head
+  "body" -> Body
+  "frameset" -> FrameSet
+  "html" -> Html
+  "area" -> Area
+  "base" -> Base
+  "br" -> BR
+  "col" -> Col
+  "embed" -> Embed
+  "hr" -> HR
+  "img" -> IMG
+  "input" -> Input
+  "link" -> Link
+  "meta" -> Meta
+  "source" -> Source
+  "track" -> Track
+  "wbr" -> WBR
+  "script" -> Script
+  "style" -> Style
+  "svg" -> SVG
+  _ -> External
 
 makeTag :: String -> [Attribute] -> Tag
-makeTag _name _attrs = Tag {tagType=strToType _name, attrs=_attrs}
+makeTag name' attrs' = Tag {tagType=strToType name', attrs=attrs', selfClosing=False}
 
-tag :: Parser Tag
-tag = discardDels <$> char '<' <*> (makeTag <$> string <*> manyParser attribute) <*> char '>'
+comment :: Parser String
+comment = (++) <$> matchString "<!--" <*> matchThrough "-->"
+
+whitespace :: Parser Char
+whitespace = char '\t' <||> char '\n' <||> char '\f' <||> char '\r' <||> char ' '
+
+manyspace :: Parser String
+manyspace = manyParser whitespace
+somespace :: Parser String
+somespace = someParser whitespace
+
+attribute :: Parser Attribute
+attribute = P $ \cs -> (cs, Left "a")
+
+checkSelfClosing tag = P $ \stream ->
+  let (P solidus) = char '/'
+  in case solidus stream of
+    (stream', Right _) -> (stream', Right Tag {
+      tagType=tagType tag
+      , attrs = attrs tag
+      , selfClosing = True
+    })
+    (stream', Left err) -> (stream, Right tag)
+
+alpha = satisfy $ \ c -> (toLower c) `elem` "abcdefghijklmnopqrstuvwxyz"
+digit = satisfy (`elem` "0123456789")
+alphanumeric = alpha <||> digit
+
+tagName = manyParser alphanumeric
+
+startTag :: Parser Tag
+startTag = P $ \stream ->
+  let 
+    dropFirst _ a = a
+    dropDels _ a _ = a
+    (P easyPart) = dropDels <$> char '<' <*> (makeTag <$> tagName <*> manyParser attribute) <*> manyspace
+  in case easyPart stream of
+    (stream', Right tag) -> let kind = getTagKind $ tagType tag in
+      if kind == Void then let (P close) = whoCares (char '/') (char '>') in end tag $ close stream'
+      else if kind == Foreign then let (P close) = checkSelfClosing tag in close stream'
+      else let (P gt) = char '>' in end tag $ gt stream'
+    (stream', Left err) -> (stream', Left err)
+  where
+    what tag (stream', res) = case res of
+      Right _ -> (stream', Right tag)
+      Left err -> (stream', Left err)
+    end tag res = case res of
+      (stream', Right _) -> (stream', Right tag)
+      (stream', Left err) -> (stream', Left err)
+
+legacy :: Parser String
+legacy = doSequentialString [somespace, matchStringIgnoreCase "SYSTEM", somespace, (matchStringIgnoreCase "'about:legacy-compat'" <||> matchStringIgnoreCase "\"about:legacy-compat\"")]
 
 doctype :: Parser String
-doctype = matchTagIgnoreCase "!doctype html"
+doctype = doSequentialString [matchStringIgnoreCase "<!DOCTYPE", somespace, matchStringIgnoreCase "html", whoCares legacy $ manyspace, matchString ">"]
 
 preProcess :: String -> String
 preProcess str = filter (/= '\r') str
@@ -179,7 +333,6 @@ doSelect (el:els) =
 
 resetInsertionMode :: State -> State
 resetInsertionMode state = _resetInsertionMode 0 state
-
 
 _resetInsertionMode :: Int -> State -> State
 _resetInsertionMode idx state =
