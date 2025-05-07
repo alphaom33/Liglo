@@ -169,26 +169,23 @@ data State = State {
 $(makeLenses ''State)
 
 doSelect :: [Tag] -> InsertionMode
-doSelect t = _doSelect $ reverse t
-
-_doSelect :: [Tag] -> InsertionMode
-_doSelect [] = Initial
-_doSelect [_] = InSelect
-_doSelect (el:els) =
+doSelect [] = Initial
+doSelect [_] = InSelect
+doSelect (el:els) =
     case tracer $ tagType el of
         Template -> InSelect
         Table -> InSelectInTable
-        _ -> _doSelect els
+        _ -> doSelect els
 
 resetInsertionMode :: State -> State
-resetInsertionMode state = _resetInsertionMode ((length $ view openElements state) - 1) state
+resetInsertionMode state = _resetInsertionMode 0 state
 
 
 _resetInsertionMode :: Int -> State -> State
 _resetInsertionMode idx state =
     let
         opened = _openElements state
-        isLast = idx == 0
+        isLast = idx == (length opened) - 1
     in case (isLast, tagType (opened!!idx)) of
         (_, Select) -> set mode (doSelect opened) state
         (False, TD) -> set mode InCell state
@@ -209,7 +206,7 @@ _resetInsertionMode idx state =
                 (Just _) -> AfterHead)
                 state
         (True, _) -> set mode InBody state
-        _ -> _resetInsertionMode (idx - 1) state
+        _ -> _resetInsertionMode (idx + 1) state
 
 parseString :: String -> (String, Either Error String)
 parseString str = ("", Right "")
