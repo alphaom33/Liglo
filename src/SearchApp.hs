@@ -28,7 +28,7 @@ import Message (Message(NewSearch, Error, EnterSite, NextPage, LastPage))
 import Brick.BChan
 import Item (Item (title, snippet, link))
 import Network (getResponse)
-import Control.Monad.Cont (MonadIO(liftIO))
+import Control.Monad.IO.Class (liftIO)
 
 newtype Search = Search {
     _query :: Text

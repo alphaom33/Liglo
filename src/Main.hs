@@ -10,7 +10,7 @@ import Brick as B
 import Data.Aeson (FromJSON, ToJSON)
 import GHC.Generics (Generic)
 import Network.HTTP.Simple as S
-import Text.RegexPR as R
+-- import Text.RegexPR as R
 import Data.Maybe (fromJust)
 import Brick.Focus (focusRingCursor)
 import Brick.Forms (Form(formFocus, formState), handleFormEvent)

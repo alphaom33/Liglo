@@ -6,7 +6,6 @@ import Brick as B
 import Data.Aeson (FromJSON, ToJSON)
 import GHC.Generics (Generic)
 import Network.HTTP.Simple as S
-import Text.RegexPR (gsubRegexPR)
 import Data.Maybe (fromJust)
 import Brick.Focus (focusRingCursor)
 import Brick.Forms (Form(formFocus, formState), handleFormEvent)
@@ -29,7 +28,7 @@ instance ToJSON GoogleResponse
 
 getResponse :: String -> String -> Int -> IO [Item]
 getResponse initial key start = do
-    let query = gsubRegexPR " " "+" initial
+    let query = initial
     let requestScheme = "https://www.googleapis.com/customsearch/v1?q=" ++ query ++ "&key=" ++ key ++ "&cx=1433b113b742d4cdb" ++ "&start=" ++ show (start * 10)
     request <- S.parseRequest requestScheme
     let

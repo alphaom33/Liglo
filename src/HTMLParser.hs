@@ -1,3 +1,4 @@
+{-# LANGUAGE ViewPatterns #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE TupleSections #-}
 {-# LANGUAGE TemplateHaskell #-}
@@ -5,7 +6,7 @@
 
 module HTMLParser where
 
-import Control.Applicative
+import Control.Applicative (Alternative, empty, many, some, (<|>))
 import Debug.Trace (trace)
 import Control.Monad.Fix (fix)
 import Data.Either (fromRight, isRight, fromLeft)
@@ -86,9 +87,11 @@ someParser (P f) = P $ \stream -> case f stream of
       (stream'', Left err) -> (stream'', Left err)
       (stream'', Right as) -> (stream'', Right (a:as))
 
+matchThrough :: Char -> Parser String
 matchThrough c = dropLast <$> manyParser (notChar c) <*> char c
     where dropLast a _ = a
 
+discardDels :: a -> b -> c -> b
 discardDels _ a _ = a
 
 char :: Char -> Parser Char
@@ -106,9 +109,11 @@ matchString = foldr (\ c -> (<*>) ((:) <$> char c)) (pure [])
 matchStringIgnoreCase :: String -> Parser String
 matchStringIgnoreCase = foldr (\ c -> (<*>) ((:) <$> charIgnoreCase c)) (pure [])
 
+matchTagIgnoreCase :: String -> Parser String
 matchTagIgnoreCase str = discardDels <$> char '<' <*> matchStringIgnoreCase str <*> char '>'
 
 checkDels :: String -> [Char] -> (String, Either Error String)
+checkDels stream [] = (stream, Left "Expected ")
 checkDels stream (del:dels) =
     let
         (P op) = char del
@@ -116,6 +121,7 @@ checkDels stream (del:dels) =
         (_, Left err) -> checkDels stream dels
         (stream', Right _) -> (stream', Right (del:[]))
 
+string :: Parser String
 string = P $ \stream -> 
     let
         dels = "'\""
@@ -123,8 +129,87 @@ string = P $ \stream ->
         (stream', Right del) -> let (P end) = matchThrough (del!!0) in end stream'
         (stream', Left err) -> (stream', Left $ err ++ dels)
 
-tag = dropDels <$> char '<' <*> ((:) <$> string <*> manyParser attribute) <*> char '>'
+data Attribute = Attribute (String, String) deriving Show
 
+attribute :: Parser Attribute
+attribute = P $ \cs -> (cs, Right $ Attribute ("", ""))
+
+data TagType = Select | Template | Table | TD | TH | TR | TBody | THead | TFoot | Caption | Colgroup | Head | Body | FrameSet | Html | External deriving Show
+
+data Tag = Tag {
+    tagType :: TagType
+    , attrs :: [Attribute]
+} deriving Show
+
+strToType :: String -> TagType
+strToType str = case str of 
+    "select" -> Select
+    _ -> External
+
+makeTag :: String -> [Attribute] -> Tag
+makeTag _name _attrs = Tag {tagType=strToType _name, attrs=_attrs}
+
+tag :: Parser Tag
+tag = discardDels <$> char '<' <*> (makeTag <$> string <*> manyParser attribute) <*> char '>'
+
+doctype :: Parser String
 doctype = matchTagIgnoreCase "!doctype html"
 
-parseString = parse doctype
+preProcess :: String -> String
+preProcess str = filter (/= '\r') str
+
+data InsertionMode = Initial | InSelect | InSelectInTable | InCell | InRow | InTableBody | InCaption | InColgroup | InTable | InHead | InBody | InFrameSet | BeforeHead | AfterHead deriving Show
+data State = State {
+    _openElements :: [Tag]
+    , _mode :: InsertionMode
+    , _templateModes :: [InsertionMode]
+    , _headPointer :: Maybe Tag
+    , _formPointer :: Maybe Tag
+} deriving (Show)
+$(makeLenses ''State)
+
+doSelect :: [Tag] -> InsertionMode
+doSelect t = _doSelect $ reverse t
+
+_doSelect :: [Tag] -> InsertionMode
+_doSelect [] = Initial
+_doSelect [_] = InSelect
+_doSelect (el:els) =
+    case tracer $ tagType el of
+        Template -> InSelect
+        Table -> InSelectInTable
+        _ -> _doSelect els
+
+resetInsertionMode :: State -> State
+resetInsertionMode state = _resetInsertionMode ((length $ view openElements state) - 1) state
+
+
+_resetInsertionMode :: Int -> State -> State
+_resetInsertionMode idx state =
+    let
+        opened = view openElements state
+        newLast = idx == (length opened) - 1
+    in case (newLast, tagType (opened!!idx)) of
+        (_, Select) -> set mode (doSelect opened) state
+        (True, TD) -> set mode InCell state
+        (True, TH) -> set mode InCell state
+        (_, TR) -> set mode InRow state
+        (_, TBody) -> set mode InTableBody state
+        (_, THead) -> set mode InTableBody state
+        (_, TFoot) -> set mode InTableBody state
+        (_, Caption) -> set mode InCaption state
+        (_, Colgroup) -> set mode InColgroup state
+        (_, Table) -> set mode InTable state
+        (_, Template) -> set mode (head $ view templateModes state) state
+        (_, Head) -> set mode InHead state
+        (_, Body) -> set mode InBody state
+        (_, FrameSet) -> set mode InFrameSet state
+        (_, Html) -> set mode (case view headPointer state of
+                (Just _) -> BeforeHead
+                Nothing -> AfterHead)
+                state
+        (True, _) -> set mode InBody state
+        _ -> _resetInsertionMode (idx - 1) state
+
+parseString :: String -> (String, Either Error String)
+parseString str = ("", Right "")
