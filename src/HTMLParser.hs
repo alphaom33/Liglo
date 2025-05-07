@@ -134,7 +134,7 @@ data Attribute = Attribute (String, String) deriving Show
 attribute :: Parser Attribute
 attribute = P $ \cs -> (cs, Right $ Attribute ("", ""))
 
-data TagType = Select | Template | Table | TD | TH | TR | TBody | THead | TFoot | Caption | Colgroup | Head | Body | FrameSet | Html | External deriving Show
+data TagType = Select | Template | Table | TD | TH | TR | TBody | THead | TFoot | Caption | Colgroup | Head | Body | FrameSet | Html | External | TestType deriving Show
 
 data Tag = Tag {
     tagType :: TagType
@@ -158,7 +158,7 @@ doctype = matchTagIgnoreCase "!doctype html"
 preProcess :: String -> String
 preProcess str = filter (/= '\r') str
 
-data InsertionMode = Initial | InSelect | InSelectInTable | InCell | InRow | InTableBody | InCaption | InColgroup | InTable | InHead | InBody | InFrameSet | BeforeHead | AfterHead deriving Show
+data InsertionMode = Initial | InSelect | InSelectInTable | InCell | InRow | InTableBody | InCaption | InColgroup | InTable | InHead | InBody | InFrameSet | BeforeHead | AfterHead | TestMode deriving (Show, Eq)
 data State = State {
     _openElements :: [Tag]
     , _mode :: InsertionMode
@@ -187,12 +187,12 @@ resetInsertionMode state = _resetInsertionMode ((length $ view openElements stat
 _resetInsertionMode :: Int -> State -> State
 _resetInsertionMode idx state =
     let
-        opened = view openElements state
-        newLast = idx == (length opened) - 1
-    in case (newLast, tagType (opened!!idx)) of
+        opened = _openElements state
+        isLast = idx == 0
+    in case (isLast, tagType (opened!!idx)) of
         (_, Select) -> set mode (doSelect opened) state
-        (True, TD) -> set mode InCell state
-        (True, TH) -> set mode InCell state
+        (False, TD) -> set mode InCell state
+        (False, TH) -> set mode InCell state
         (_, TR) -> set mode InRow state
         (_, TBody) -> set mode InTableBody state
         (_, THead) -> set mode InTableBody state
@@ -205,8 +205,8 @@ _resetInsertionMode idx state =
         (_, Body) -> set mode InBody state
         (_, FrameSet) -> set mode InFrameSet state
         (_, Html) -> set mode (case view headPointer state of
-                (Just _) -> BeforeHead
-                Nothing -> AfterHead)
+                Nothing -> BeforeHead
+                (Just _) -> AfterHead)
                 state
         (True, _) -> set mode InBody state
         _ -> _resetInsertionMode (idx - 1) state

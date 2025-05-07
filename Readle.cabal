@@ -15,18 +15,39 @@ build-type:          Simple
 extra-source-files:  CHANGELOG.md
 cabal-version:       >=1.10
 
+library Readle-lib
+    exposed-modules: 
+        SearchApp
+        Webpage
+        Message
+        Network
+        HTMLParser
+        Item
+    hs-source-dirs: src
+    build-depends:
+        base >=4.14,
+        http-client >= 0,
+        http-conduit >= 2.3.9,
+        json >= 0.11,
+        aeson >= 2.2.3,
+        text >= 2.0.2,
+        brick >= 2.8.3,
+        vty >= 6.4,
+        vty-crossplatform >= 0.4,
+        word-wrap >= 0.5,
+        microlens-th >= 0.4.3,
+        microlens-mtl >= 0.2.1,
+        microlens >= 0.4.14,
+        mtl >= 2.2.2,
+        bytestring >= 0.11.5.2
+    default-language: Haskell2010
+
 executable Readle
   main-is:             Main.hs
   other-modules:
-      SearchApp
-      Webpage
-      Message
-      Network
-      HTMLParser
-      Item
   -- other-extensions:
   build-depends:       
-    base >=4.14,
+    base >= 4.14,
     http-client >= 0,
     http-conduit >= 2.3.9,
     json >= 0.11,
@@ -40,7 +61,18 @@ executable Readle
     microlens-mtl >= 0.2.1,
     microlens >= 0.4.14,
     mtl >= 2.2.2,
-    bytestring >= 0.11.5.2
+    bytestring >= 0.11.5.2,
+    Readle-lib
 
-  hs-source-dirs:      src
+  hs-source-dirs:      app
   default-language:    Haskell2010
+
+test-suite tests
+    type: exitcode-stdio-1.0
+    main-is: HTMLParserTest.hs
+    build-depends:
+        base >= 4.14,
+        HUnit >= 1.6.2.0,
+        Readle-lib
+    hs-source-dirs: test
+    default-language: Haskell2010
