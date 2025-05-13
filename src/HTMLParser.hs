@@ -12,8 +12,9 @@ import Control.Monad.Fix (fix)
 
 import Lens.Micro.Mtl (view)
 import Lens.Micro.TH (makeLenses)
-import Lens.Micro (set)
+import Lens.Micro (set, (&), (%~))
 import Data.Char (toUpper, toLower)
+import qualified Data.Set as S
 
 tracer :: Show a => a -> a
 tracer a = trace (show a) a
@@ -145,15 +146,15 @@ string = P $ \stream ->
         (stream', Right del) -> let (P end) = matchThrough del in end stream'
         (stream', Left err) -> (stream', Left $ err ++ dels)
 
-data Attribute = Attribute (String, String) deriving (Show, Eq)
+data Attribute = Attribute (String, String) deriving (Show, Eq, Ord)
 
 data TagType = 
   Select |
   Template |
   Table |
-  TD |
-  TH |
-  TR |
+  Td |
+  Th |
+  Tr |
   TBody |
   THead |
   TFoot |
@@ -166,47 +167,281 @@ data TagType =
   External |
   Area |
   Base |
-  BR |
+  Br |
   Col |
   Embed |
-  HR |
-  IMG |
+  Hr |
+  Img |
   Input |
   Link |
   Meta |
   Source |
   Track |
-  WBR |
+  Wbr |
   Script |
   Style |
   TextArea |
   Title |
   SVG |
+  Address |
+  Applet |
+  Article |
+  Aside |
+  Basefont |
+  Bgsound |
+  Blockquote |
+  Br |
+  Button |
+  Center |
+  Dd |
+  Details |
+  Dir |
+  Div |
+  Dl |
+  Dt |
+  Fieldset |
+  Figcaption |
+  Figure |
+  Footer |
+  Form |
+  Frame |
+  Frameset |
+  H1 |
+  H2 |
+  H3 |
+  H4 |
+  H5 |
+  H6 |
+  Header |
+  Hgroup |
+  Hr |
+  Iframe |
+  Img |
+  Keygen |
+  Li |
+  Listing |
+  Main |
+  Marquee |
+  Menu |
+  Nav |
+  Noembed |
+  Noframes |
+  Noscript |
+  Object |
+  Ol |
+  Param |
+  Plaintext |
+  Pre |
+  Search |
+  Section |
+  Summary |
+  Tbody |
+  Td |
+  Textarea |
+  Tfoot |
+  Th |
+  Thead |
+  Tr |
+  Ul |
+  Wbr |
+  Xmp |
+  MathMLMi |
+  MathMLMo |
+  MathMLMn |
+  MathMLMs |
+  MathMLMtext |
+  MathMLAnnotationXml |
+  SVGForeignObject |
+  SVGDesc |
+  SVGTitle |
+  A |
+  B |
+  Big |
+  Code |
+  Em |
+  Font |
+  I |
+  Nobr |
+  S |
+  Small |
+  Strike |
+  Strong |
+  Tt |
+  U |
+  PTag |
   TestType deriving (Show, Eq)
 
+data Category = Special | Formatting | Ordinary
+specials = [
+        Address,
+        Applet,
+        Area,
+        Article,
+        Aside,
+        Base,
+        Basefont,
+        Bgsound,
+        Blockquote,
+        Body,
+        Br,
+        Button,
+        Caption,
+        Center,
+        Col,
+        Colgroup,
+        Dd,
+        Details,
+        Dir,
+        Div,
+        Dl,
+        Dt,
+        Embed,
+        Fieldset,
+        Figcaption,
+        Figure,
+        Footer,
+        Form,
+        Frame,
+        Frameset,
+        H1,
+        H2,
+        H3,
+        H4,
+        H5,
+        H6,
+        Head,
+        Header,
+        Hgroup,
+        Hr,
+        Html,
+        Iframe,
+        Img,
+        Input,
+        Keygen,
+        Li,
+        Link,
+        Listing,
+        Main,
+        Marquee,
+        Menu,
+        Meta,
+        Nav,
+        Noembed,
+        Noframes,
+        Noscript,
+        Object,
+        Ol,
+        PTag,
+        Param,
+        Plaintext,
+        Pre,
+        Script,
+        Search,
+        Section,
+        Select,
+        Source,
+        Style,
+        Summary,
+        Table,
+        Tbody,
+        Td,
+        Template,
+        Textarea,
+        Tfoot,
+        Th,
+        Thead,
+        Title,
+        Tr,
+        Track,
+        Ul,
+        Wbr,
+        Xmp,
+        MathMLMi,
+        MathMLMo,
+        MathMLMn,
+        MathMLMs,
+        MathMLMtext,
+        MathMLAnnotationXml,
+        SVGForeignObject,
+        SVGDesc,
+        SVGTitle
+    ]
+formattings = [
+  A,
+  B,
+  Big,
+  Code,
+  Em,
+  Font,
+  I,
+  Nobr,
+  S,
+  Small,
+  Strike,
+  Strong,
+  Tt,
+  U
+    ]
+
 data ElementKind = Void | TheTemplate | RawText | EscapableText | Foreign | Normal deriving (Show, Eq)
+data Scope = InScope | InListScope | InButtonScope | InTableScope | InSelectScope deriving (Show, Eq)
 
 data Tag = Tag {
     tagType :: TagType
+    , nameSpace :: String
     , attrs :: [Attribute]
     , selfClosing :: Bool
 } deriving (Show, Eq)
+
+getTagCategory :: TagType -> Category
+getTagCategory tagType = 
+    if tagType `elem` specials then Special
+    else if tagType `elem` formattings then Formatting
+    else Ordinary
+
+-- getTagScope :: TagType -> Scope
+-- getTagScope tagType
+--     | tagType `elem` [
+--         Applet,
+--         Caption,
+--         Html,
+--         Table,
+--         Td,
+--         Th,
+--         Marquee,
+--         Object,
+--         Template,
+--         MathMLMi,
+--         MathMLMo,
+--         MathMLMn,
+--         MathMLMs,
+--         MathMLMtext,
+--         MathMLAnnotationXml,
+--         SVGForeignObject,
+--         SVGDesc,
+--         SVGTitle
+--         ] = InScope 
+--     | tagType `elem` [Ol, Ul] = InListScope 
+--     | tagType `elem` [] = InButtonScope 
+--     | tagType `elem` [] = InTableScope 
+--     | tagType `elem` [] = InSelectScope
+
 
 getTagKind :: TagType -> ElementKind
 getTagKind tagType = case tagType of
   Area -> Void
   Base -> Void
-  BR -> Void
+  Br -> Void
   Col -> Void
   Embed -> Void
   HR -> Void
-  IMG -> Void
+  Img -> Void
   Input -> Void
   Link -> Void
   Meta -> Void
   Source -> Void
   Track -> Void
-  WBR -> Void
+  Wbr -> Void
   Template -> TheTemplate
   Script -> RawText
   Style -> RawText
@@ -220,9 +455,9 @@ strToType str = case map toLower str of
   "select" -> Select
   "template" -> Template
   "table" -> Table
-  "td" -> TD
-  "th" -> TH
-  "tr" -> TR
+  "td" -> Td
+  "th" -> Th
+  "tr" -> Tr
   "tbody" -> TBody
   "thead" -> THead
   "tfoot" -> TFoot
@@ -234,17 +469,17 @@ strToType str = case map toLower str of
   "html" -> Html
   "area" -> Area
   "base" -> Base
-  "br" -> BR
+  "br" -> Br
   "col" -> Col
   "embed" -> Embed
-  "hr" -> HR
-  "img" -> IMG
+  "hr" -> Hr
+  "img" -> Img
   "input" -> Input
   "link" -> Link
   "meta" -> Meta
   "source" -> Source
   "track" -> Track
-  "wbr" -> WBR
+  "wbr" -> Wbr
   "script" -> Script
   "style" -> Style
   "svg" -> SVG
@@ -315,12 +550,56 @@ preProcess str = filter (/= '\r') str
 data InsertionMode = Initial | InSelect | InSelectInTable | InCell | InRow | InTableBody | InCaption | InColgroup | InTable | InHead | InBody | InFrameSet | BeforeHead | AfterHead | TestMode deriving (Show, Eq)
 data State = State {
     _openElements :: [Tag]
+    , _activeFormattingElements :: [Tag]
     , _mode :: InsertionMode
     , _templateModes :: [InsertionMode]
     , _headPointer :: Maybe Tag
     , _formPointer :: Maybe Tag
 } deriving (Show)
 $(makeLenses ''State)
+
+data ActiveFormattingElement = ActiveFormattingElement Applet | ActiveFormattingElement Object | ActiveFormattingElement Marquee | ActiveFormattingElement Template | ActiveFormattingElement Td | ActiveFormattingElement Th | ActiveFormattingElement Caption | Marker
+
+pushToActiveFormatting :: State -> Tag -> State
+pushToActiveFormatting state tag =
+    let
+        elements = _activeFormattingElements state
+        countTags = foldl (\ a b -> a + if S.fromList (attrs b) == S.fromList (attrs tag) then 1 else 0) 0 elements 
+        elements' = 
+            if countTags >= 3 then drop 1 elements
+            else elements
+    in
+        set activeFormattingElements (tag:elements') state
+
+insertAt :: a -> Int -> [a] -> [a]
+insertAt newElement 0 as = newElement:as
+insertAt newElement i (a:as) = a : insertAt newElement (i - 1) as
+
+reconstructActiveFormatting :: State -> State
+reconstructActiveFormatting state
+    | length els == 0 = state
+    | els!!0 == Marker = state
+    | els!!0 `elem` (_openElements state) = state
+    | _ = rewind 0
+    where 
+        els = (_activeFormattingElements state)
+        check el = els!!el != Marker && not (els!!el `elem` (_openElements))
+        rewind el 
+            | el == 0 = create el
+            | check nel = rewind nel
+            | _ = advance nel
+            where nel = el - 1
+        advance state el = create state $ el + 1
+        create state el = if el == (length els - 1) then newState else advance newState el
+            where 
+                newHTMLElement = insertHTMLElement els!!el
+                newState = set activeFormattingElements (insertAt newHTMLElement el (_activeFormattingElements state))
+
+clearActiveFormatting :: State -> State
+clearActiveFormatting state = set activeFormattingElements (clearEl (_activeFormattingElements state)) state
+    where clearEl (el:els)
+            | el == Marker = clearEl els
+            | _ = els
 
 doSelect :: [Tag] -> InsertionMode
 doSelect [] = Initial
@@ -341,9 +620,9 @@ _resetInsertionMode idx state =
         isLast = idx == (length opened) - 1
     in case (isLast, tagType (opened!!idx)) of
         (_, Select) -> set mode (doSelect opened) state
-        (False, TD) -> set mode InCell state
-        (False, TH) -> set mode InCell state
-        (_, TR) -> set mode InRow state
+        (False, Td) -> set mode InCell state
+        (False, Th) -> set mode InCell state
+        (_, Tr) -> set mode InRow state
         (_, TBody) -> set mode InTableBody state
         (_, THead) -> set mode InTableBody state
         (_, TFoot) -> set mode InTableBody state
