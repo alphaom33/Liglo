@@ -15,6 +15,7 @@ import Lens.Micro.TH (makeLenses)
 import Lens.Micro (set, (&), (%~))
 import Data.Char (toUpper, toLower)
 import qualified Data.Set as S
+import Data.Either (isRight)
 
 tracer :: Show a => a -> a
 tracer a = trace (show a) a
@@ -148,17 +149,16 @@ string = P $ \stream ->
 
 data Attribute = Attribute (String, String) deriving (Show, Eq, Ord)
 
+data ActiveFormattingTagType =  Applet | Object | Marquee | Template | Td | Th | Caption deriving (Show, Eq)
+
 data TagType = 
+  ActiveFormattingTagType ActiveFormattingTagType |
   Select |
-  Template |
   Table |
-  Td |
-  Th |
   Tr |
   TBody |
   THead |
   TFoot |
-  Caption |
   Colgroup |
   Head |
   Body |
@@ -171,7 +171,6 @@ data TagType =
   Col |
   Embed |
   Hr |
-  Img |
   Input |
   Link |
   Meta |
@@ -184,13 +183,11 @@ data TagType =
   Title |
   SVG |
   Address |
-  Applet |
   Article |
   Aside |
   Basefont |
   Bgsound |
   Blockquote |
-  Br |
   Button |
   Center |
   Dd |
@@ -214,20 +211,17 @@ data TagType =
   H6 |
   Header |
   Hgroup |
-  Hr |
   Iframe |
   Img |
   Keygen |
   Li |
   Listing |
   Main |
-  Marquee |
   Menu |
   Nav |
   Noembed |
   Noframes |
   Noscript |
-  Object |
   Ol |
   Param |
   Plaintext |
@@ -236,14 +230,10 @@ data TagType =
   Section |
   Summary |
   Tbody |
-  Td |
   Textarea |
   Tfoot |
-  Th |
   Thead |
-  Tr |
   Ul |
-  Wbr |
   Xmp |
   MathMLMi |
   MathMLMo |
@@ -434,7 +424,7 @@ getTagKind tagType = case tagType of
   Br -> Void
   Col -> Void
   Embed -> Void
-  HR -> Void
+  Hr -> Void
   Img -> Void
   Input -> Void
   Link -> Void
@@ -548,17 +538,72 @@ preProcess :: String -> String
 preProcess str = filter (/= '\r') str
 
 data InsertionMode = Initial | InSelect | InSelectInTable | InCell | InRow | InTableBody | InCaption | InColgroup | InTable | InHead | InBody | InFrameSet | BeforeHead | AfterHead | TestMode deriving (Show, Eq)
+
+data StateMachineState = DataState | CharacterReferenceState | TagOpenState | RCDataState | RawTextState | RCDataLessThanSignState | ScriptDataState | ScriptDataLessThanSignState | PlainTextState | MarkupDeclarationOpenState | EndTagOpenState | RawTextLessThanSignState deriving Show
+
 data State = State {
-    _openElements :: [Tag]
+    _stateMachineState :: StateMachineState
+    , _returnState :: StateMachineState
+    , _input :: String
+    , _currentInputCharacter :: Char
+    , _openElements :: [Tag]
     , _activeFormattingElements :: [Tag]
     , _mode :: InsertionMode
     , _templateModes :: [InsertionMode]
     , _headPointer :: Maybe Tag
     , _formPointer :: Maybe Tag
+    , _scriptingEnabled :: Bool
+    , _framesetOk :: Bool
+    , _reconsume :: Bool
 } deriving (Show)
 $(makeLenses ''State)
 
-data ActiveFormattingElement = ActiveFormattingElement Applet | ActiveFormattingElement Object | ActiveFormattingElement Marquee | ActiveFormattingElement Template | ActiveFormattingElement Td | ActiveFormattingElement Th | ActiveFormattingElement Caption | Marker
+data ActiveFormattingElement = ActiveFormattingElement ActiveFormattingTagType | Marker deriving Show
+
+data InputToken = Ampersand | LessThan | Null | EOF deriving Show
+
+getNextInputCharacter :: State -> (State, Char)
+getNextInputCharacter state = (state, '&')
+
+emitToken :: Char -> State -> State
+emitToken char state = state
+
+doStateMachine state = case _stateMachineState state of
+    DataState -> case nextInputCharacter of
+        '&' -> set returnState DataState (set stateMachineState CharacterReferenceState state')
+        '<' -> set stateMachineState TagOpenState state'
+        '\0' -> emitToken (_currentInputCharacter state') state'
+        '#' -> emitToken '\x0003' state'
+        _ -> emitToken (_currentInputCharacter state') state'
+    RCDataState -> case nextInputCharacter of
+        '&' -> set returnState RCDataState (set stateMachineState CharacterReferenceState state')
+        '<' -> set stateMachineState RCDataLessThanSignState state'
+        '\0' -> emitToken '\xfffd' state'
+        '#' -> emitToken '\x0003' state'
+        _ -> emitToken (_currentInputCharacter state') state'
+    RawTextState -> case nextInputCharacter of
+        '<' -> set stateMachineState RawTextLessThanSignState state'
+        '\0' -> emitToken '\xfffd' state'
+        '#' -> emitToken '\x0003' state'
+        _ -> emitToken (_currentInputCharacter state') state'
+    ScriptDataState -> case nextInputCharacter of
+        '<' -> set stateMachineState ScriptDataLessThanSignState state'
+        '\0' -> emitToken '\xfffd' state'
+        '#' -> emitToken '\x0003' state'
+        _ -> emitToken (_currentInputCharacter state') state'
+    PlainTextState -> case nextInputCharacter of
+        '\0' -> emitToken '\xfffd' state'
+        '#' -> emitToken '\x0003' state'
+        _ -> emitToken (_currentInputCharacter state') state'
+    TagOpenState
+        | nextInputCharacter == '!' -> set stateMachineState MarkupDeclarationOpenState state'
+        | nextInputCharacter == '/' -> set stateMachineState EndTagOpenState state' 
+        | isRight $ snd $ parse alpha $ nextInputCharacter:[] -> state'
+        | nextInputCharacter == '?' -> state'
+        | nextInputCharacter == '#' -> state'
+    _ -> state
+    where (state', nextInputCharacter) = getNextInputCharacter state
+
 
 pushToActiveFormatting :: State -> Tag -> State
 pushToActiveFormatting state tag =
