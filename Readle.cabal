@@ -23,6 +23,7 @@ library Readle-lib
         Network
         HTMLParser
         Item
+        CharacterReferences
     hs-source-dirs: src
     build-depends:
         base >=4.14,
