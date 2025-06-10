@@ -2,6 +2,7 @@
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE TupleSections #-}
 {-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE MultiWayIf #-}
 {-# OPTIONS_GHC -Wall #-}
 
 module HTMLParser where
@@ -19,7 +20,7 @@ import Data.Either (isRight, fromRight)
 import Data.Maybe (isJust, isNothing, fromJust)
 import Data.Map (keys, (!))
 import Data.Char (chr)
-import Data.List (sortOn)
+import Data.List (sortOn, elemIndex)
 
 import qualified CharacterReferences as C
 
@@ -159,7 +160,9 @@ data TagType =
     Applet |
     Object |
     Marquee |
-    Template |
+    Template {
+        templateContents :: Node
+    } |
     Td |
     Th |
     Caption |
@@ -270,6 +273,19 @@ data TagType =
     U |
     PTag |
     TestType deriving (Show, Eq)
+
+data Node = Node {
+    _nodeName :: String
+    , _nodeTagType :: TagType
+    , _nodeAttrs :: [Attribute]
+    , _nodeNameSpace :: String
+    , _nodeIsStart :: Bool
+    , _nextNodes :: [Node]
+    , _parent :: Maybe Node
+} deriving (Show, Eq)
+$(makeLenses ''Node)
+
+data Position = Position (Node, Int) deriving Show
 
 data Category = Special | Formatting | Ordinary
 specials = [
@@ -440,7 +456,7 @@ getTagKind tagType = case tagType of
   Source -> Void
   Track -> Void
   Wbr -> Void
-  Template -> TheTemplate
+  (Template _) -> TheTemplate
   Script -> RawText
   Style -> RawText
   TextArea -> EscapableText
@@ -451,7 +467,7 @@ getTagKind tagType = case tagType of
 strToType :: String -> TagType
 strToType str = case map toLower str of
   "select" -> Select
-  "template" -> Template
+  "template" -> Template {}
   "table" -> Table
   "td" -> Td
   "th" -> Th
@@ -607,7 +623,7 @@ data StateMachineState =
     | NumericCharacterReferenceEndState
     deriving (Show, Eq)
 
-type ActiveFormattingElement = Maybe Tag
+type ActiveFormattingElement = Maybe Node
 
 data Comment = Comment String deriving (Show, Eq)
 
@@ -630,7 +646,7 @@ data State = State {
     _stateMachineState :: StateMachineState
     , _returnState :: StateMachineState
     , _input :: String
-    , _openElements :: [Tag]
+    , _openElements :: [Node]
     , _activeFormattingElements :: [ActiveFormattingElement]
     , _mode :: InsertionMode
     , _templateModes :: [InsertionMode]
@@ -640,11 +656,11 @@ data State = State {
     , _framesetOk :: Bool
     , _currentTagToken :: Tag
     , _currentCommentToken :: Comment
-    , _currentToken :: Token
     , _currentDOCTYPEToken :: DOCTYPE
     , _temporaryBuffer :: String
     , _characterReferenceCode :: Int
     , _lastEmitted :: Token
+    , _lastStart :: Maybe Tag
 } deriving (Show)
 $(makeLenses ''State)
 
@@ -654,8 +670,12 @@ getNextInputCharacter state =
     in (over input (drop 1) state, out)
 
 emitToken :: Token -> State -> State
+emitToken (TagToken t) state = (if _opening t
+    then set lastStart (Just t)
+    else id) $ set lastEmitted (trace (show t) TagToken t) state
 emitToken token state = trace (show token) $ set lastEmitted token state
 
+doStateMachine :: State -> State
 doStateMachine state = case _stateMachineState state of
     DataState -> case nextInputCharacter of
         '&' -> set returnState DataState (set stateMachineState CharacterReferenceState state')
@@ -687,14 +707,14 @@ doStateMachine state = case _stateMachineState state of
         | nextInputCharacter == '!' -> set stateMachineState MarkupDeclarationOpenState state'
         | nextInputCharacter == '/' -> set stateMachineState EndTagOpenState state' 
         | isRight $ snd $ parse alpha [nextInputCharacter] -> set stateMachineState TagNameState $ set currentTagToken (makeTag True) state
-        | nextInputCharacter == '?' -> set stateMachineState BogusCommentState state -- create comment
+        | nextInputCharacter == '?' -> set stateMachineState BogusCommentState $ set currentCommentToken (Comment "") state
         | nextInputCharacter == '#' -> emitToken EOF $ emitToken (Character '<') state'
         | otherwise -> set stateMachineState DataState $ emitToken (Character '<') state
     EndTagOpenState
         | isRight $ snd $ parse alpha [nextInputCharacter] -> set stateMachineState TagNameState $ set currentTagToken (makeTag False) state
         | nextInputCharacter == '>' -> set stateMachineState DataState state'
         | nextInputCharacter == '#' -> emitToken EOF $ emitToken (Character '/') $ emitToken (Character '<') state'
-        | otherwise -> set stateMachineState BogusCommentState state -- create comment
+        | otherwise -> set stateMachineState BogusCommentState $ set currentCommentToken (Comment "") state
     TagNameState
         | nextInputCharacter `elem` "\t\n\f " -> set stateMachineState BeforeAttributeNameState state'
         | nextInputCharacter == '/' -> set stateMachineState SelfClosingStartTag state'
@@ -709,14 +729,14 @@ doStateMachine state = case _stateMachineState state of
     RCDataEndTagOpenState -> if followsParse alpha
         then set stateMachineState RCDataEndTagNameState state
         else set stateMachineState RCDataState $ emitToken (Character '/') $ emitToken (Character '<') state
-    RCDataEndTagNameState -> doNameState RCDataState
+    RCDataEndTagNameState -> doEndNameState RCDataState
     RawTextLessThanSignState -> if nextInputCharacter == '/'
         then set stateMachineState RawTextEndTagOpenState (set temporaryBuffer "" state')
         else set stateMachineState RawTextState (emitToken (Character '<') state)
     RawTextEndTagOpenState -> if followsParse alpha
         then set stateMachineState RawTextEndTagNameState $ set currentTagToken (makeTag False) state
         else set stateMachineState RawTextState $ emitToken (Character '/') $ emitToken (Character '<') state
-    RawTextEndTagNameState -> doNameState RawTextState
+    RawTextEndTagNameState -> doEndNameState RawTextState
     ScriptDataLessThanSignState -> case nextInputCharacter of
         '/' -> set stateMachineState ScriptDataEndTagOpenState (set temporaryBuffer "" state')
         '!' -> emitToken (Character '!') $ emitToken (Character '<') $ set stateMachineState ScriptDataEscapeStartState state'
@@ -724,7 +744,7 @@ doStateMachine state = case _stateMachineState state of
     ScriptDataEndTagOpenState -> if followsParse alpha
         then set stateMachineState ScriptDataEndTagNameState state
         else set stateMachineState ScriptDataState $ emitToken (Character '/') $ emitToken (Character '<') state
-    ScriptDataEndTagNameState -> doNameState ScriptDataState
+    ScriptDataEndTagNameState -> doEndNameState ScriptDataState
     ScriptDataEscapeStartState -> if nextInputCharacter == '-'
         then emitToken (Character '-') $ set stateMachineState ScriptDataEscapeStartDashState state'
         else set stateMachineState ScriptDataState state
@@ -755,9 +775,9 @@ doStateMachine state = case _stateMachineState state of
         | followsParse alpha -> set stateMachineState ScriptDataDoubleEscapeStartState $ emitToken (Character '<') $ set temporaryBuffer "" state
         | otherwise -> set stateMachineState ScriptDataEscapedState $ emitToken (Character '<') state
     ScriptDataEscapedEndTagOpenState -> if followsParse alpha
-        then set stateMachineState ScriptDataEscapedEndTagNameState state -- create end tag
+        then set stateMachineState ScriptDataEscapedEndTagNameState $ set currentTagToken (makeTag False) state
         else set stateMachineState ScriptDataEscapedState $ emitToken (Character '/') $ emitToken (Character '<') state
-    ScriptDataEscapedEndTagNameState -> doNameState ScriptDataEscapedState
+    ScriptDataEscapedEndTagNameState -> doEndNameState ScriptDataEscapedState
     ScriptDataDoubleEscapeStartState
         | nextInputCharacter `elem` "\t\n\f />" -> emitToken (Character nextInputCharacter) $ set stateMachineState (if _temporaryBuffer state' == "script"
             then ScriptDataDoubleEscapedState
@@ -912,7 +932,7 @@ doStateMachine state = case _stateMachineState state of
         | nextInputCharacter `elem` "\t\n\f " -> state'
         | nextInputCharacter == '\0' -> set stateMachineState DOCTYPENameState $ ahhhh '\xfffd' $ createDoctype state'
         | nextInputCharacter == '>' -> emitToken (DOCTYPEToken $ _currentDOCTYPEToken state') $ set stateMachineState DataState $ setDOCTYPEFlag $ createDoctype state'
-        | nextInputCharacter == '#' -> emitToken EOF $ emitToken (_currentToken state') $ setDOCTYPEFlag $ createDoctype state'
+        | nextInputCharacter == '#' -> emitToken EOF $ emitToken (DOCTYPEToken $ _currentDOCTYPEToken state') $ setDOCTYPEFlag $ createDoctype state'
         | otherwise -> set stateMachineState DOCTYPENameState $ ahhhh (toLower nextInputCharacter) $ createDoctype state'
         where ahhhh c = over currentDOCTYPEToken (set name $ Just [c])
     DOCTYPENameState
@@ -1085,9 +1105,11 @@ doStateMachine state = case _stateMachineState state of
         appendToComment c s = over currentCommentToken (\ (Comment thing) -> Comment $ thing ++ [c]) s
         (state', nextInputCharacter) = getNextInputCharacter state
         followsParse a = isRight $ snd $ parse a [nextInputCharacter]
-        appropriateEndTagToken = True
+        appropriateEndTagToken = case _lastStart state of
+            Just t -> _tagName t == _tagName (_currentTagToken state)
+            Nothing -> False
         appendCharacter c = over currentTagToken (over tagName (++[c])) state'
-        doNameState endState
+        doEndNameState endState
             | appropriateEndTagToken && nextInputCharacter `elem` "\t\n\f " = set stateMachineState BeforeAttributeNameState state'
             | appropriateEndTagToken && nextInputCharacter == '/' = set stateMachineState SelfClosingStartTag state'
             | appropriateEndTagToken && nextInputCharacter == '>' = emitToken (TagToken $ _currentTagToken state') (set stateMachineState DataState state')
@@ -1095,20 +1117,103 @@ doStateMachine state = case _stateMachineState state of
             | otherwise = set stateMachineState endState (foldr (\ a b -> emitToken (Character a) b) (emitToken (Character '/') (emitToken (Character '<') state)) (_temporaryBuffer state))
         hexToInt c = read $ "0x" ++ [c]
 
-lastMarker :: State -> [Tag]
+getAttr :: String -> Node -> Maybe Attribute
+getAttr attrName tag = if length check /= 0
+    then Just $ head check
+    else Nothing
+    where check = filter (\ (Attribute (n, _)) -> n == attrName) $ _nodeAttrs tag
+
+inHTMLNamespace :: Node -> Bool
+inHTMLNamespace token =  _nodeNameSpace token == "http://www.w3.org/1999/xhtml"
+
+isMathMLTextIntegrationPoint :: Node -> Bool
+isMathMLTextIntegrationPoint token = _nodeTagType token `elem` [MathMLMi, MathMLMo, MathMLMn, MathMLMs, MathMLMtext]
+
+isHTMLIntegrationPoint :: Node -> Bool
+isHTMLIntegrationPoint token =
+    _nodeTagType token `elem` [SVGForeignObject, SVGDesc, SVGTitle] 
+    || (_nodeTagType token == MathMLAnnotationXml
+        && (case at of
+            (Just (Attribute (_, val))) -> val `elem` ["text/html", "application/xhtml+xml"]
+            _ -> False))
+        where at = getAttr "encoding" token
+
+treeConstructionDispatch :: Token -> State -> State
+treeConstructionDispatch token state = if 
+    length (_openElements state) == 0
+    || inHTMLNamespace currentNode 
+    || isMathMLTextIntegrationPoint currentNode && ((_nodeIsStart currentNode && (not $ _nodeName currentNode `elem` ["mglyph", "malignmark"])) || isCharacter)
+    || _nodeIsStart currentNode && _nodeTagType currentNode == MathMLAnnotationXml && _nodeName currentNode == "svg"
+    || (isHTMLIntegrationPoint currentNode && (_nodeIsStart currentNode || isCharacter))
+    || token == EOF
+    then parseByInsertionMode state
+    else parseForeign state
+    where 
+        currentNode = head $ _openElements state
+        isCharacter = case token of
+            (Character _) -> True
+            _ -> False
+
+parseByInsertionMode :: State -> State
+parseByInsertionMode state = state
+
+parseForeign :: State -> State
+parseForeign state = state
+
+findAppropriatePlaceForInsertingNode :: Bool -> Maybe Node -> State -> Position
+findAppropriatePlaceForInsertingNode fosterParenting override state = 
+    let
+        adjustedInsertionLocation = if fosterParenting && _nodeTagType target `elem` [Table, TBody, TFoot, Tr]
+        then if
+            | isJust lastTemplate && templateIndex > fromJust (elemIndex lable (_openElements state)) -> let temple = fromJust lastTemplate in Position (temple, length (_nextNodes temple) - 1) -- grab from contents or something I'm not really sure
+            | hasParent lable -> 
+                let tableParent = fromJust $ _parent lable
+                in Position (tableParent, fromJust $ elemIndex lable $ _nextNodes tableParent)
+            | otherwise -> 
+                let 
+                    yindex = elemIndex lable (_openElements state)
+                    previousElement = (_openElements state) !! (fromJust yindex - 1)
+                in Position (previousElement, length (_nextNodes previousElement) - 1)
+        else Position (target, length (_nextNodes target) - 1)
+        (Position (el, _)) = adjustedInsertionLocation 
+    in
+        case _nodeTagType el of
+            (Template temple) -> let conts = templateContents $ Template temple in Position (conts, length (_nextNodes conts) - 1)
+            _ -> adjustedInsertionLocation
+    where
+        lable = fromJust lastTable
+        hasParent el = isJust $ _parent el
+        lastTemplate = lastElementOfTemplate $ _openElements state
+        lastTable = lastElementOfType Table $ _openElements state
+        templateIndex = fromJust $ elemIndex (fromJust lastTemplate) (_openElements state)
+        isTemplate el = case _nodeTagType el of
+            (Template _) -> True
+            _ -> False
+        lastElementOfTemplate [] = Nothing
+        lastElementOfTemplate (el:els) = if isTemplate el
+            then Just el
+            else lastElementOfTemplate els
+        lastElementOfType _ [] = Nothing
+        lastElementOfType toFind (el:els) = if _nodeTagType el == toFind
+            then Just el
+            else lastElementOfType toFind els
+        target = case override of
+            (Just o) -> o
+            _ -> head $ _openElements state
+
+lastMarker :: State -> [Node]
 lastMarker state = cutUntilMarker [] $ reverse $ _activeFormattingElements state
     where
-        cutUntilMarker :: [Tag] -> [ActiveFormattingElement] -> [Tag]
         cutUntilMarker out [] = out
         cutUntilMarker out (Nothing:_) = out
         cutUntilMarker out (Just el:els) = cutUntilMarker (el:out) els
 
 
-pushToActiveFormatting :: State -> Tag -> State
+pushToActiveFormatting :: State -> Node -> State
 pushToActiveFormatting state tag =
     let
         elements = _activeFormattingElements state
-        countTags = foldl (\ a b -> a + if S.fromList (_attrs b) == S.fromList (_attrs tag) then 1 else 0) 0 (lastMarker state)
+        countTags = foldl (\ a b -> a + if S.fromList (_nodeAttrs b) == S.fromList (_nodeAttrs tag) then 1 else 0) 0 (lastMarker state)
         elements' = 
             if countTags >= 3 then drop 1 elements
             else elements
@@ -1137,7 +1242,7 @@ reconstructActiveFormatting state
 
         create state el = if el == (length els - 1) then newState else advance newState el
             where 
-                insertHTMLElement el = Just Tag {}
+                insertHTMLElement el = Just Node {}
                 newHTMLElement = insertHTMLElement (els!!el)
                 newState = set activeFormattingElements (insertAt newHTMLElement el (_activeFormattingElements state)) state
 
@@ -1149,12 +1254,12 @@ clearActiveFormatting state = set activeFormattingElements (clearEl (_activeForm
             | isNothing el = clearEl els
             | otherwise = els
 
-doSelect :: [Tag] -> InsertionMode
+doSelect :: [Node] -> InsertionMode
 doSelect [] = Initial
 doSelect [_] = InSelect
 doSelect (el:els) =
-    case _tagType el of
-        Template -> InSelect
+    case _nodeTagType el of
+        (Template _) -> InSelect
         Table -> InSelectInTable
         _ -> doSelect els
 
@@ -1166,7 +1271,7 @@ _resetInsertionMode idx state =
     let
         opened = _openElements state
         isLast = idx == (length opened) - 1
-    in case (isLast, _tagType (opened!!idx)) of
+    in case (isLast, _nodeTagType (opened!!idx)) of
         (_, Select) -> set mode (doSelect opened) state
         (False, Td) -> set mode InCell state
         (False, Th) -> set mode InCell state
@@ -1177,7 +1282,7 @@ _resetInsertionMode idx state =
         (_, Caption) -> set mode InCaption state
         (_, Colgroup) -> set mode InColgroup state
         (_, Table) -> set mode InTable state
-        (_, Template) -> set mode (head $ view templateModes state) state
+        (_, (Template _)) -> set mode (head $ view templateModes state) state
         (_, Head) -> set mode InHead state
         (_, Body) -> set mode InBody state
         (_, FrameSet) -> set mode InFrameSet state
@@ -1193,7 +1298,7 @@ parseString str =
     _parseString State {
         _stateMachineState = DataState
         , _returnState = DataState
-        , _input = str ++ "#"
+        , _input = preProcess str ++ "#"
         , _openElements = []
         , _activeFormattingElements = []
         , _mode = Initial
@@ -1204,11 +1309,11 @@ parseString str =
         , _framesetOk = True
         , _currentTagToken = Tag {}
         , _currentCommentToken = Comment ""
-        , _currentToken = (Character 'd')
         , _currentDOCTYPEToken = DOCTYPE {}
         , _temporaryBuffer = ""
         , _characterReferenceCode = 0
         , _lastEmitted = (Character 'a')
+        , _lastStart = Nothing
     }
 
 _parseString :: State -> State
