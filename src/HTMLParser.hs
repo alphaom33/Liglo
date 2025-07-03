@@ -17,7 +17,7 @@ import Lens.Micro (set, over)
 import Data.Char (toUpper, toLower)
 import qualified Data.Set as S
 import Data.Either (isRight, fromRight)
-import Data.Maybe (isJust, isNothing, fromJust)
+import Data.Maybe (isJust, isNothing, fromJust, fromMaybe, listToMaybe)
 import Data.Map (keys, (!))
 import Data.Char (chr)
 import Data.List (sortOn, elemIndex)
@@ -274,6 +274,49 @@ data TagType =
     PTag |
     TestType deriving (Show, Eq)
 
+data CustomElementDefinition = CustomElementDefinition {
+    name :: String
+    , localName :: String
+} deriving (Show, Eq)
+data CustomElementRegistry = CustomElementRegistry {
+    customElementDefinitionSet :: [CustomElementDefinition]
+} deriving (Show, Eq)
+
+lookUpACustomElementDefinition :: Nodeable a => Maybe CustomElementRegistry -> Maybe String -> String -> Maybe String -> Maybe a
+lookUpACustomElementDefinition registry p_nameSpace p_localName is =
+    if isNothing registry || fromMaybe "" p_nameSpace /= "html"
+    then Nothing
+    else listToMaybe $ filter (\ el -> localName el == p_localName && (name el == p_localName || Just (name el) == is)) (customElementDefinitionSet $ fromJust registry)
+
+
+class Nodeable a where
+    getNode :: a -> Node
+    getCustomElementRegistry :: a -> Maybe CustomElementRegistry
+
+data Document = Document {
+    _documentNode :: Node
+    , _documentCustomElementRegistry :: CustomElementRegistry
+} deriving (Show, Eq)
+instance Nodeable Document where
+    getNode this = _documentNode this
+    getCustomElementRegistry this = Just $ _documentCustomElementRegistry this
+
+data Element = Element {
+    _elementNode :: Node
+    , _elementCustomElementRegistry :: CustomElementRegistry
+} deriving (Show, Eq)
+instance Nodeable Element where
+    getNode this = _elementNode this
+    getCustomElementRegistry this = Just $ _elementCustomElementRegistry this
+
+data ShadowRoot = ShadowRoot {
+    _shadowRootNode :: Node
+    , _shadowRootCustomElementRegistry :: CustomElementRegistry
+} deriving (Show, Eq)
+instance Nodeable ShadowRoot where
+    getNode this = _shadowRootNode this
+    getCustomElementRegistry this = Just $ _shadowRootCustomElementRegistry this
+
 data Node = Node {
     _nodeName :: String
     , _nodeTagType :: TagType
@@ -282,8 +325,12 @@ data Node = Node {
     , _nodeIsStart :: Bool
     , _nextNodes :: [Node]
     , _parent :: Maybe Node
+    , _nodeDocument :: Document
 } deriving (Show, Eq)
 $(makeLenses ''Node)
+instance Nodeable Node where
+    getNode this = this
+    getCustomElementRegistry _ = Nothing
 
 data Position = Position (Node, Int) deriving Show
 
@@ -1123,6 +1170,13 @@ getAttr attrName tag = if length check /= 0
     else Nothing
     where check = filter (\ (Attribute (n, _)) -> n == attrName) $ _nodeAttrs tag
 
+tagGetAttr :: String -> Tag -> Maybe Attribute
+tagGetAttr attrName tag = if length check /= 0
+    then Just $ head check
+    else Nothing
+    where check = filter (\ (Attribute (n, _)) -> n == attrName) $ _attrs tag
+
+
 inHTMLNamespace :: Node -> Bool
 inHTMLNamespace token =  _nodeNameSpace token == "http://www.w3.org/1999/xhtml"
 
@@ -1164,17 +1218,17 @@ findAppropriatePlaceForInsertingNode :: Bool -> Maybe Node -> State -> Position
 findAppropriatePlaceForInsertingNode fosterParenting override state = 
     let
         adjustedInsertionLocation = if fosterParenting && _nodeTagType target `elem` [Table, TBody, TFoot, Tr]
-        then if
-            | isJust lastTemplate && templateIndex > fromJust (elemIndex lable (_openElements state)) -> let temple = fromJust lastTemplate in Position (temple, length (_nextNodes temple) - 1) -- grab from contents or something I'm not really sure
-            | hasParent lable -> 
-                let tableParent = fromJust $ _parent lable
-                in Position (tableParent, fromJust $ elemIndex lable $ _nextNodes tableParent)
-            | otherwise -> 
-                let 
-                    yindex = elemIndex lable (_openElements state)
-                    previousElement = (_openElements state) !! (fromJust yindex - 1)
-                in Position (previousElement, length (_nextNodes previousElement) - 1)
-        else Position (target, length (_nextNodes target) - 1)
+            then if
+                | isJust lastTemplate && templateIndex > fromJust (elemIndex lable (_openElements state)) -> let temple = fromJust lastTemplate in Position (temple, length (_nextNodes temple) - 1)
+                | hasParent lable -> 
+                    let tableParent = fromJust $ _parent lable
+                    in Position (tableParent, fromJust $ elemIndex lable $ _nextNodes tableParent)
+                | otherwise -> 
+                    let 
+                        yindex = elemIndex lable (_openElements state)
+                        previousElement = (_openElements state) !! (fromJust yindex - 1)
+                    in Position (previousElement, length (_nextNodes previousElement) - 1)
+            else Position (target, length (_nextNodes target) - 1)
         (Position (el, _)) = adjustedInsertionLocation 
     in
         case _nodeTagType el of
@@ -1200,6 +1254,31 @@ findAppropriatePlaceForInsertingNode fosterParenting override state =
         target = case override of
             (Just o) -> o
             _ -> head $ _openElements state
+
+createAnElement :: Document -> String -> Maybe String -> Maybe String -> Maybe String -> Bool -> CustomElementRegistry
+createAnElement document localName p_nameSpace prefix is synchronousCustomElements registry = Node {}
+
+createAnElementForAToken :: Nodeable a => Token -> String -> a -> Node
+createAnElementForAToken token p_nameSpace intendedParent =
+    let
+        document = intendedParent
+        localName = _tagName tagoken
+        is = tagGetAttr "is" tagoken
+        registry = getCustomElementRegistry intendedParent
+        definition = lookUpACustomElementDefinition registry p_nameSpace localName is
+        willExecuteScript = isJust definition
+
+        document' = if willExecuteScript
+            then over (+1) throwOnDynamicMarkupInsertionCounter document
+            else document
+        element = createAnElement document' localName p_nameSpace Nothing is willExecuteScript registry
+        element' = over (++ _attrs token) nodeAttrs element 
+    in
+        element'
+    where 
+        tagoken = case token of
+            (TagToken t) -> t
+            _ -> Tag {}
 
 lastMarker :: State -> [Node]
 lastMarker state = cutUntilMarker [] $ reverse $ _activeFormattingElements state
