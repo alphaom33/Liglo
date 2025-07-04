@@ -295,6 +295,7 @@ class Nodeable a where
 
 data Document = Document {
     _documentNode :: Node
+    , _throwOnDynamicMarkupInsertionCounter :: Int
     , _documentCustomElementRegistry :: CustomElementRegistry
 } deriving (Show, Eq)
 instance Nodeable Document where
@@ -327,10 +328,15 @@ data Node = Node {
     , _parent :: Maybe Node
     , _nodeDocument :: Document
 } deriving (Show, Eq)
-$(makeLenses ''Node)
 instance Nodeable Node where
     getNode this = this
     getCustomElementRegistry _ = Nothing
+
+$(makeLenses ''Node)
+$(makeLenses ''Document)
+
+isResettable node = _nodeTagType node `elem` [Input, Output, Select, TextArea] -- also form-associated custom elements
+doReset node = 
 
 data Position = Position (Node, Int) deriving Show
 
@@ -1269,10 +1275,14 @@ createAnElementForAToken token p_nameSpace intendedParent =
         willExecuteScript = isJust definition
 
         document' = if willExecuteScript
-            then over (+1) throwOnDynamicMarkupInsertionCounter document
+            then over (+1) throwOnDynamicMarkupInsertionCounter document -- javascript
             else document
         element = createAnElement document' localName p_nameSpace Nothing is willExecuteScript registry
         element' = over (++ _attrs token) nodeAttrs element 
+
+        document'' = if willExecuteScript
+            then over (-1) throwOnDynamicMarkupInsertionCounter document' -- javascript
+            else document'
     in
         element'
     where 
