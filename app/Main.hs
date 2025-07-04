@@ -43,7 +43,7 @@ import Data.Either (fromRight)
 -- textify (HTMLParser.Tag _ children) = concatMap texxtify (reverse children)
 
 main = do
-    print $ parseString "<!doctype html SYSTEM 'asdf'><html><div a=asdf><div></div></div></html>"
+    -- print $ parseString "<!doctype html SYSTEM 'asdf'><html><div a=asdf><div></div></div></html>"
     -- args <- getArgs 
     -- let arged = gsubRegexPR " " "+" $ concat args
     -- key <- lookupEnv "GOOGLE_API_KEY" 
@@ -51,9 +51,9 @@ main = do
     -- finalState <- defaultMain app $ initialState apiKey (head args) 
 
     -- a <- parseRequest $ _curQuery finalState
-    -- b <- httpLBS a
-    -- let asdf = unpack (getResponseBody b)
+    b <- httpLBS "https://example.com"
+    let asdf = unpack (getResponseBody b)
 
-    -- let result = parseString asdf
-    -- print result
+    let result = parseString asdf
+    print result
     -- writeFile "asdf.html" $ textify $ fromRight HTMLParser.Tag {} $ snd $ result

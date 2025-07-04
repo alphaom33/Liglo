@@ -160,9 +160,7 @@ data TagType =
     Applet |
     Object |
     Marquee |
-    Template {
-        templateContents :: Node
-    } |
+    Template |
     Td |
     Th |
     Caption |
@@ -273,72 +271,6 @@ data TagType =
     U |
     PTag |
     TestType deriving (Show, Eq)
-
-data CustomElementDefinition = CustomElementDefinition {
-    name :: String
-    , localName :: String
-} deriving (Show, Eq)
-data CustomElementRegistry = CustomElementRegistry {
-    customElementDefinitionSet :: [CustomElementDefinition]
-} deriving (Show, Eq)
-
-lookUpACustomElementDefinition :: Nodeable a => Maybe CustomElementRegistry -> Maybe String -> String -> Maybe String -> Maybe a
-lookUpACustomElementDefinition registry p_nameSpace p_localName is =
-    if isNothing registry || fromMaybe "" p_nameSpace /= "html"
-    then Nothing
-    else listToMaybe $ filter (\ el -> localName el == p_localName && (name el == p_localName || Just (name el) == is)) (customElementDefinitionSet $ fromJust registry)
-
-
-class Nodeable a where
-    getNode :: a -> Node
-    getCustomElementRegistry :: a -> Maybe CustomElementRegistry
-
-data Document = Document {
-    _documentNode :: Node
-    , _throwOnDynamicMarkupInsertionCounter :: Int
-    , _documentCustomElementRegistry :: CustomElementRegistry
-} deriving (Show, Eq)
-instance Nodeable Document where
-    getNode this = _documentNode this
-    getCustomElementRegistry this = Just $ _documentCustomElementRegistry this
-
-data Element = Element {
-    _elementNode :: Node
-    , _elementCustomElementRegistry :: CustomElementRegistry
-} deriving (Show, Eq)
-instance Nodeable Element where
-    getNode this = _elementNode this
-    getCustomElementRegistry this = Just $ _elementCustomElementRegistry this
-
-data ShadowRoot = ShadowRoot {
-    _shadowRootNode :: Node
-    , _shadowRootCustomElementRegistry :: CustomElementRegistry
-} deriving (Show, Eq)
-instance Nodeable ShadowRoot where
-    getNode this = _shadowRootNode this
-    getCustomElementRegistry this = Just $ _shadowRootCustomElementRegistry this
-
-data Node = Node {
-    _nodeName :: String
-    , _nodeTagType :: TagType
-    , _nodeAttrs :: [Attribute]
-    , _nodeNameSpace :: String
-    , _nodeIsStart :: Bool
-    , _nextNodes :: [Node]
-    , _parent :: Maybe Node
-    , _nodeDocument :: Document
-} deriving (Show, Eq)
-instance Nodeable Node where
-    getNode this = this
-    getCustomElementRegistry _ = Nothing
-
-$(makeLenses ''Node)
-$(makeLenses ''Document)
-
-isResettable node = _nodeTagType node `elem` [Input, Output, Select, TextArea] -- also form-associated custom elements
-doReset node = 
-
-data Position = Position (Node, Int) deriving Show
 
 data Category = Special | Formatting | Ordinary
 specials = [
@@ -465,57 +397,6 @@ getTagCategory tagType =
     if tagType `elem` specials then Special
     else if tagType `elem` formattings then Formatting
     else Ordinary
-
--- getTagScope :: TagType -> Scope
--- getTagScope tagType
---     | tagType `elem` [
---         Applet,
---         Caption,
---         Html,
---         Table,
---         Td,
---         Th,
---         Marquee,
---         Object,
---         Template,
---         MathMLMi,
---         MathMLMo,
---         MathMLMn,
---         MathMLMs,
---         MathMLMtext,
---         MathMLAnnotationXml,
---         SVGForeignObject,
---         SVGDesc,
---         SVGTitle
---         ] = InScope 
---     | tagType `elem` [Ol, Ul] = InListScope 
---     | tagType `elem` [] = InButtonScope 
---     | tagType `elem` [] = InTableScope 
---     | tagType `elem` [] = InSelectScope
-
-
-getTagKind :: TagType -> ElementKind
-getTagKind tagType = case tagType of
-  Area -> Void
-  Base -> Void
-  Br -> Void
-  Col -> Void
-  Embed -> Void
-  Hr -> Void
-  Img -> Void
-  Input -> Void
-  Link -> Void
-  Meta -> Void
-  Source -> Void
-  Track -> Void
-  Wbr -> Void
-  (Template _) -> TheTemplate
-  Script -> RawText
-  Style -> RawText
-  TextArea -> EscapableText
-  Title -> EscapableText
-  SVG -> Foreign
-  _ -> Normal
 
 strToType :: String -> TagType
 strToType str = case map toLower str of
@@ -676,8 +557,6 @@ data StateMachineState =
     | NumericCharacterReferenceEndState
     deriving (Show, Eq)
 
-type ActiveFormattingElement = Maybe Node
-
 data Comment = Comment String deriving (Show, Eq)
 
 data DOCTYPE = DOCTYPE {
@@ -699,8 +578,6 @@ data State = State {
     _stateMachineState :: StateMachineState
     , _returnState :: StateMachineState
     , _input :: String
-    , _openElements :: [Node]
-    , _activeFormattingElements :: [ActiveFormattingElement]
     , _mode :: InsertionMode
     , _templateModes :: [InsertionMode]
     , _headPointer :: Maybe Tag 
@@ -926,9 +803,7 @@ doStateMachine state = case _stateMachineState state of
     MarkupDeclarationOpenState
         | isRight outComment -> set stateMachineState CommentStartState $ set input restComment $ set currentCommentToken (Comment "") state
         | isRight outDoctype -> set stateMachineState DOCTYPEState $ set input restDoctype state
-        | isRight outCData -> (if length (_openElements state') /= 0 && not (inHtmlNamespace ((_openElements state')!!0))
-            then set stateMachineState CDATASectionState
-            else set stateMachineState BogusCommentState) $ set input restCData $ set currentCommentToken (Comment "") state
+        | isRight outCData -> set stateMachineState BogusCommentState $ set input restCData $ set currentCommentToken (Comment "") state
         | otherwise -> set stateMachineState BogusCommentState $ set currentCommentToken (Comment "") state
         where
             inHtmlNamespace tag = True
@@ -1170,226 +1045,12 @@ doStateMachine state = case _stateMachineState state of
             | otherwise = set stateMachineState endState (foldr (\ a b -> emitToken (Character a) b) (emitToken (Character '/') (emitToken (Character '<') state)) (_temporaryBuffer state))
         hexToInt c = read $ "0x" ++ [c]
 
-getAttr :: String -> Node -> Maybe Attribute
-getAttr attrName tag = if length check /= 0
-    then Just $ head check
-    else Nothing
-    where check = filter (\ (Attribute (n, _)) -> n == attrName) $ _nodeAttrs tag
-
-tagGetAttr :: String -> Tag -> Maybe Attribute
-tagGetAttr attrName tag = if length check /= 0
-    then Just $ head check
-    else Nothing
-    where check = filter (\ (Attribute (n, _)) -> n == attrName) $ _attrs tag
-
-
-inHTMLNamespace :: Node -> Bool
-inHTMLNamespace token =  _nodeNameSpace token == "http://www.w3.org/1999/xhtml"
-
-isMathMLTextIntegrationPoint :: Node -> Bool
-isMathMLTextIntegrationPoint token = _nodeTagType token `elem` [MathMLMi, MathMLMo, MathMLMn, MathMLMs, MathMLMtext]
-
-isHTMLIntegrationPoint :: Node -> Bool
-isHTMLIntegrationPoint token =
-    _nodeTagType token `elem` [SVGForeignObject, SVGDesc, SVGTitle] 
-    || (_nodeTagType token == MathMLAnnotationXml
-        && (case at of
-            (Just (Attribute (_, val))) -> val `elem` ["text/html", "application/xhtml+xml"]
-            _ -> False))
-        where at = getAttr "encoding" token
-
-treeConstructionDispatch :: Token -> State -> State
-treeConstructionDispatch token state = if 
-    length (_openElements state) == 0
-    || inHTMLNamespace currentNode 
-    || isMathMLTextIntegrationPoint currentNode && ((_nodeIsStart currentNode && (not $ _nodeName currentNode `elem` ["mglyph", "malignmark"])) || isCharacter)
-    || _nodeIsStart currentNode && _nodeTagType currentNode == MathMLAnnotationXml && _nodeName currentNode == "svg"
-    || (isHTMLIntegrationPoint currentNode && (_nodeIsStart currentNode || isCharacter))
-    || token == EOF
-    then parseByInsertionMode state
-    else parseForeign state
-    where 
-        currentNode = head $ _openElements state
-        isCharacter = case token of
-            (Character _) -> True
-            _ -> False
-
-parseByInsertionMode :: State -> State
-parseByInsertionMode state = state
-
-parseForeign :: State -> State
-parseForeign state = state
-
-findAppropriatePlaceForInsertingNode :: Bool -> Maybe Node -> State -> Position
-findAppropriatePlaceForInsertingNode fosterParenting override state = 
-    let
-        adjustedInsertionLocation = if fosterParenting && _nodeTagType target `elem` [Table, TBody, TFoot, Tr]
-            then if
-                | isJust lastTemplate && templateIndex > fromJust (elemIndex lable (_openElements state)) -> let temple = fromJust lastTemplate in Position (temple, length (_nextNodes temple) - 1)
-                | hasParent lable -> 
-                    let tableParent = fromJust $ _parent lable
-                    in Position (tableParent, fromJust $ elemIndex lable $ _nextNodes tableParent)
-                | otherwise -> 
-                    let 
-                        yindex = elemIndex lable (_openElements state)
-                        previousElement = (_openElements state) !! (fromJust yindex - 1)
-                    in Position (previousElement, length (_nextNodes previousElement) - 1)
-            else Position (target, length (_nextNodes target) - 1)
-        (Position (el, _)) = adjustedInsertionLocation 
-    in
-        case _nodeTagType el of
-            (Template temple) -> let conts = templateContents $ Template temple in Position (conts, length (_nextNodes conts) - 1)
-            _ -> adjustedInsertionLocation
-    where
-        lable = fromJust lastTable
-        hasParent el = isJust $ _parent el
-        lastTemplate = lastElementOfTemplate $ _openElements state
-        lastTable = lastElementOfType Table $ _openElements state
-        templateIndex = fromJust $ elemIndex (fromJust lastTemplate) (_openElements state)
-        isTemplate el = case _nodeTagType el of
-            (Template _) -> True
-            _ -> False
-        lastElementOfTemplate [] = Nothing
-        lastElementOfTemplate (el:els) = if isTemplate el
-            then Just el
-            else lastElementOfTemplate els
-        lastElementOfType _ [] = Nothing
-        lastElementOfType toFind (el:els) = if _nodeTagType el == toFind
-            then Just el
-            else lastElementOfType toFind els
-        target = case override of
-            (Just o) -> o
-            _ -> head $ _openElements state
-
-createAnElement :: Document -> String -> Maybe String -> Maybe String -> Maybe String -> Bool -> CustomElementRegistry
-createAnElement document localName p_nameSpace prefix is synchronousCustomElements registry = Node {}
-
-createAnElementForAToken :: Nodeable a => Token -> String -> a -> Node
-createAnElementForAToken token p_nameSpace intendedParent =
-    let
-        document = intendedParent
-        localName = _tagName tagoken
-        is = tagGetAttr "is" tagoken
-        registry = getCustomElementRegistry intendedParent
-        definition = lookUpACustomElementDefinition registry p_nameSpace localName is
-        willExecuteScript = isJust definition
-
-        document' = if willExecuteScript
-            then over (+1) throwOnDynamicMarkupInsertionCounter document -- javascript
-            else document
-        element = createAnElement document' localName p_nameSpace Nothing is willExecuteScript registry
-        element' = over (++ _attrs token) nodeAttrs element 
-
-        document'' = if willExecuteScript
-            then over (-1) throwOnDynamicMarkupInsertionCounter document' -- javascript
-            else document'
-    in
-        element'
-    where 
-        tagoken = case token of
-            (TagToken t) -> t
-            _ -> Tag {}
-
-lastMarker :: State -> [Node]
-lastMarker state = cutUntilMarker [] $ reverse $ _activeFormattingElements state
-    where
-        cutUntilMarker out [] = out
-        cutUntilMarker out (Nothing:_) = out
-        cutUntilMarker out (Just el:els) = cutUntilMarker (el:out) els
-
-
-pushToActiveFormatting :: State -> Node -> State
-pushToActiveFormatting state tag =
-    let
-        elements = _activeFormattingElements state
-        countTags = foldl (\ a b -> a + if S.fromList (_nodeAttrs b) == S.fromList (_nodeAttrs tag) then 1 else 0) 0 (lastMarker state)
-        elements' = 
-            if countTags >= 3 then drop 1 elements
-            else elements
-    in
-        set activeFormattingElements ((Just tag):elements') state
-
-insertAt :: a -> Int -> [a] -> [a]
-insertAt newElement 0 as = newElement:as
-insertAt newElement i (a:as) = a : insertAt newElement (i - 1) as
-
-reconstructActiveFormatting :: State -> State
-reconstructActiveFormatting state
-    | length els == 0 = state
-    | isNothing $ els!!0 = state
-    | els!!0 `elem` (map (\ e -> Just e) (_openElements state)) = state
-    | otherwise = rewind 0
-    where 
-        els = (_activeFormattingElements state)
-        check el = isJust (els!!el) && not ((fromJust $ els!!el) `elem` _openElements state)
-        rewind el
-            | el == 0 = create state el
-            | check nel = rewind nel
-            | otherwise = advance state nel
-            where nel = el - 1
-        advance state el = create state $ el + 1
-
-        create state el = if el == (length els - 1) then newState else advance newState el
-            where 
-                insertHTMLElement el = Just Node {}
-                newHTMLElement = insertHTMLElement (els!!el)
-                newState = set activeFormattingElements (insertAt newHTMLElement el (_activeFormattingElements state)) state
-
-clearActiveFormatting :: State -> State
-clearActiveFormatting state = set activeFormattingElements (clearEl (_activeFormattingElements state)) state
-    where 
-        clearEl [] = []
-        clearEl (el:els)
-            | isNothing el = clearEl els
-            | otherwise = els
-
-doSelect :: [Node] -> InsertionMode
-doSelect [] = Initial
-doSelect [_] = InSelect
-doSelect (el:els) =
-    case _nodeTagType el of
-        (Template _) -> InSelect
-        Table -> InSelectInTable
-        _ -> doSelect els
-
-resetInsertionMode :: State -> State
-resetInsertionMode state = _resetInsertionMode 0 state
-
-_resetInsertionMode :: Int -> State -> State
-_resetInsertionMode idx state =
-    let
-        opened = _openElements state
-        isLast = idx == (length opened) - 1
-    in case (isLast, _nodeTagType (opened!!idx)) of
-        (_, Select) -> set mode (doSelect opened) state
-        (False, Td) -> set mode InCell state
-        (False, Th) -> set mode InCell state
-        (_, Tr) -> set mode InRow state
-        (_, TBody) -> set mode InTableBody state
-        (_, THead) -> set mode InTableBody state
-        (_, TFoot) -> set mode InTableBody state
-        (_, Caption) -> set mode InCaption state
-        (_, Colgroup) -> set mode InColgroup state
-        (_, Table) -> set mode InTable state
-        (_, (Template _)) -> set mode (head $ view templateModes state) state
-        (_, Head) -> set mode InHead state
-        (_, Body) -> set mode InBody state
-        (_, FrameSet) -> set mode InFrameSet state
-        (_, Html) -> set mode (case view headPointer state of
-                Nothing -> BeforeHead
-                (Just _) -> AfterHead)
-                state
-        (True, _) -> set mode InBody state
-        _ -> _resetInsertionMode (idx + 1) state
-
 parseString :: String -> State
 parseString str = 
     _parseString State {
         _stateMachineState = DataState
         , _returnState = DataState
         , _input = preProcess str ++ "#"
-        , _openElements = []
-        , _activeFormattingElements = []
         , _mode = Initial
         , _templateModes = []
         , _headPointer = Nothing
