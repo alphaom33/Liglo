@@ -44,9 +44,9 @@ main = do
     --     exitSuccess)
     --
 
-    a <- parseRequest $ "https://hoogle.haskell.org"--S._curQuery finalState
+    a <- parseRequest $ "https://hoogle.haskell.org?hoogle=map"--S._curQuery finalState
     b <- httpLBS a
     let asdf = unpack (getResponseBody b)
     let result = parseString asdf
-    -- writeFile "asdf.dumb" $ foldr (\ a b -> show a ++ "\n" ++ b) "" $ _emitted result
+    writeFile "asdf.html" asdf
     defaultMain H.app $ H.initialState $ _emitted result
