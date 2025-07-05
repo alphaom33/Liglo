@@ -15,13 +15,11 @@ import Control.Monad (join)
 import Data.Text (Text, unpack)
 import Item (Item)
 
+import Debug.Trace
 
 newtype GoogleResponse = GoogleResponse {
     items :: [Item]
 } deriving (Show, Generic)
-
-instance FromJSON Item
-instance ToJSON Item
 
 instance FromJSON GoogleResponse
 instance ToJSON GoogleResponse
@@ -29,10 +27,10 @@ instance ToJSON GoogleResponse
 getResponse :: String -> String -> Int -> IO [Item]
 getResponse initial key start = do
     let query = initial
-    let requestScheme = "https://www.googleapis.com/customsearch/v1?q=" ++ query ++ "&key=" ++ key ++ "&cx=1433b113b742d4cdb" ++ "&start=" ++ show (start * 10)
+        requestScheme = "https://www.googleapis.com/customsearch/v1?q=" ++ query ++ "&key=" ++ key ++ "&cx=1433b113b742d4cdb" ++ "&start=" ++ show (start * 10)
     request <- S.parseRequest requestScheme
-    let
-        response = S.httpJSON request
-        googleResponse = fmap getResponseBody response
+    let response = S.httpJSON request
+    let googleResponse = fmap getResponseBody response
         itemResponse = fmap items googleResponse
+
     itemResponse

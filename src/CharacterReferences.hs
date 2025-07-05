@@ -1,5 +1,6 @@
 module CharacterReferences where
 
+import Data.Char (toLower)
 import qualified Data.Map as Map
 
 characterReferences = Map.fromList [
@@ -2265,3 +2266,30 @@ errToCodePoint = Map.fromList [
     , (0x9E, 0x017E)
     , (0x9F, 0x0178)
     ]
+
+checkIs :: [Char] -> Char -> Bool
+checkIs arr n = toLower n `elem` arr
+
+isAlpha :: Char -> Bool
+isAlpha = checkIs "abcdefghijklmnopqrstuvwxyz"
+
+isAlphaUpper :: Char -> Bool
+isAlphaUpper = (`elem` "ABCDEFGHIJKLMNOPQRSTUVWXYZ")
+
+isHexDigit :: Char -> Bool
+isHexDigit = checkIs "0123456789abcdef"
+
+isDigit :: Char -> Bool
+isDigit = checkIs "0123456789"
+
+isAlphanumeric :: Char -> Bool
+isAlphanumeric n = isAlpha n || isDigit n
+
+isControl :: Int -> Bool
+isControl n = 0x007f <= n && n <= 0x009f
+
+isSurrogate :: Int -> Bool
+isSurrogate n = (0xd800 <= n && n <= 0xdbff) || (0xdc00 <= n && n <= 0xdfff)
+
+isWhitespace :: Int -> Bool
+isWhitespace n = 0x007f <= n && n <= 0x009f
