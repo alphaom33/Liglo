@@ -29,10 +29,12 @@ import Message
 data BuilderData = BuilderData {
     _toRead :: [Token]
     , _openTags :: [String]
-    , _out :: String
-} deriving (Show)
+    , _out :: [Widget Name]
+    , _currentHBox :: [Widget Name]
+    , _currentText :: String
+}
 $(makeLenses ''BuilderData)
-builderData emittedTokens = BuilderData {_openTags=[], _out=[], _toRead=emittedTokens}
+builderData emittedTokens = BuilderData {_openTags=[], _out=[], _toRead=emittedTokens, _currentHBox=[], _currentText=""}
 
 data State = State {
     _emittedTokens :: [Token]
@@ -52,32 +54,38 @@ hotkeys = fromList [
     ]
 
 buildHtml :: State -> [Widget Name]
-buildHtml state = [viewport Viewport1 Vertical $ strWrap $ reverse $ _out $ _buildHtml $ builderData (_emittedTokens state)]
+buildHtml state = [viewport Viewport1 Vertical $ vBox $ _out $ _buildHtml $ builderData $ _emittedTokens state]
 
 _buildHtml :: BuilderData -> BuilderData
 
 _buildHtml mhm = case _toRead mhm of
     (TagToken t:emittedTokens) -> _buildHtml $ (if
         | _selfClosing t -> if _tagName t == "br"
-            then over out ('\n':) mhm'
+            then appendHbox mhm'
             else mhm'
-        | _opening t -> over openTags (_tagName t:) mhm'
-        | not $ _opening t -> (if _tagName t `elem` ["li", "h1", "h2", "h3", "h4", "h5", "h6", "p", "pre", "div"]
-            then over out ('\n':)
-            else id) $ over openTags (drop 1) mhm'
+        | _opening t -> over openTags (_tagName t:) $ if not (null $ _currentText mhm)
+            then (endings t mhm')
+            else mhm'
+        | not $ _opening t -> over openTags (drop 1) $ endings t mhm'
         | otherwise -> mhm')
-    (Character c:emittedTokens) -> _buildHtml $ if c `elem` " \n\t"
-        then killWhitespace mhm'
-        else (if length (_openTags mhm) > 0 && length (["head", "meta", "link", "script", "style", "select"] `intersect` _openTags mhm) == 0
-            then over out (c:)
+        where
+            appendHbox mhm = over out (++[hBox $ _currentHBox mhm]) $ set currentHBox [] mhm
+            endings t mhm = if _tagName t `elem` ["li", "h1", "h2", "h3", "h4", "h5", "h6", "p", "pre", "div"]
+                then appendHbox mhm'
+                else over currentHBox (++[withAttr (attrName $ _tagName t) $ str $ reverse $ _currentText mhm]) mhm' 
+                where mhm' = set currentText "" mhm
+    (Character c:emittedTokens) -> _buildHtml $ (if c `elem` " \n\t"
+        then killWhitespace
+        else if length (_openTags mhm) > 0 && null (["head", "meta", "link", "script", "style", "select"] `intersect` _openTags mhm)
+            then \ mhm -> over currentText (c:) mhm
             else id) mhm'
     (e:emittedTokens) -> _buildHtml mhm'
     [] -> mhm
     where (next, mhm') = (_toRead mhm !! 0, over toRead (drop 1) mhm)
 
-killWhitespace mhm = _killWhitespace $ (if length (_out mhm) == 0 || _out mhm !! 0 `elem` " \n\t"
+killWhitespace mhm = _killWhitespace $ (if null (_out mhm) || (null (_currentText mhm) && null (_currentHBox mhm))
     then id
-    else over out (' ':)) mhm
+    else over currentText (' ':)) mhm
 
 _killWhitespace mhm = case next of
     (Character c) -> if c `elem` " \n\t"
@@ -116,6 +124,8 @@ app = App {
     , appChooseCursor = neverShowCursor
     , appDraw = buildHtml
     , appHandleEvent = handler
-    , appAttrMap = \ _ -> attrMap defAttr []
+    , appAttrMap = \ _ -> attrMap defAttr [
+        (attrName "b", defAttr `withStyle` V.bold `withBackColor` black)
+        ]
     }
 
