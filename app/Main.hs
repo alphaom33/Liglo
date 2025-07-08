@@ -31,6 +31,7 @@ import qualified HTMLBuilder as H
 import Message (Message(NewSearch, NextPage, LastPage))
 import Network
 import HTMLParser
+import CSSParser as C
 
 main = do
     -- args <- getArgs
@@ -44,9 +45,11 @@ main = do
     --     exitSuccess)
     --
 
-    a <- parseRequest $ "https://hoogle.haskell.org?hoogle=map"--S._curQuery finalState
-    b <- httpLBS a
-    let asdf = unpack (getResponseBody b)
-    let result = parseString asdf
-    writeFile "asdf.html" asdf
-    defaultMain H.app $ H.initialState $ _emitted result
+    -- a <- parseRequest $ "https://hoogle.haskell.org?hoogle=map"--S._curQuery finalState
+    -- b <- httpLBS a
+    -- let asdf = unpack (getResponseBody b)
+    -- let result = parseString asdf
+    -- writeFile "asdf.html" asdf
+    -- defaultMain H.app $ H.initialState $ _emitted result
+    print $ C.parseString "/*asdf*/aaab"
+
