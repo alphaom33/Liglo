@@ -9,6 +9,9 @@ import Data.Char
 
 import HTMLParser (tracer)
 
+import Control.Monad (return)
+import Control.Exception (catch)
+
 type Error = String
 data Parser a = Parser { parse :: String -> (String, Either Error a)}
 
@@ -41,6 +44,14 @@ manyParser (Parser f) = Parser $ fix $ \ this stream -> case f stream of
         (rest', Left err) -> (rest', Left err)
         (rest', Right as) -> (rest', Right $ a : as)
 
+parseUntil (Parser f) (Parser end) = Parser $ fix $ \ this stream -> case end stream of
+    (rest, Right _) -> (rest, Right [])
+    (_, Left err) -> case f stream of
+        (rest, Left err) -> (rest, Left err)
+        (rest, Right a) -> case this rest of
+            (rest', Left err) -> (rest', Left err)
+            (rest', Right as) -> (rest', Right $ a : as)
+
 someParser (Parser f) = Parser $ \ stream -> case f stream of
     (rest, Right a) -> 
         let (Parser fany) = (manyParser $ Parser f) 
@@ -48,6 +59,15 @@ someParser (Parser f) = Parser $ \ stream -> case f stream of
             (rest', Left err) -> (rest', Left err)
             (rest', Right as) -> (rest', Right $ a : as)
     (rest, Left err) -> (rest, Left err)
+
+numParser num (Parser f) = Parser (go num)
+    where 
+        go 0 stream = (stream, Right [])
+        go num stream = case f stream of
+            (rest, Right a) -> case go (num - 1) rest of
+                (rest', Right as) -> (rest', Right $ a : as)
+                (rest', Left err) -> (rest', Left err)
+            (rest, Left err) -> (rest, Left err)
 
 try (Parser f) = Parser $ \ stream -> case f stream of
     (rest, Right a) -> (rest, Right a)
@@ -58,6 +78,12 @@ satisfy f = Parser $ \ stream -> case stream of
     (c:cs) 
         | f c -> (cs, Right c)
         | otherwise -> (cs, Left "did not satisfy")
+
+pluralate p = ((:) <$> p <*> pure [])
+
+passes (Parser f) = Parser $ \ stream -> case f stream of
+    (_, Right _) -> (stream, Right True)
+    (_, Left _) -> ("", Right False)
 
 replaceAll :: String -> String -> String -> String
 replaceAll regex toInsert str =
@@ -165,23 +191,14 @@ consumeString :: Char -> Parser CSSToken
 consumeString endingCodePoint = dropDels <$> matchChar endingCodePoint <*> eatStringInsides endingCodePoint <*> matchChar endingCodePoint
     where dropDels _ a _ = a
 
-checkWouldStartIdentSequence = Parser $ \ stream -> (stream, Right $
-    if length stream < 3
-        then False
-        else let (f:s:t:rest) = stream in if
-            | f == '-' -> if
-                | checkMatches identy s -> True
-                | s == '-' -> True
-                | s == '\\' && t /= '\n' -> True
-            | checkMatches startIdenty f -> True
-            | f == '\\' && t /= '\n' -> True
-            | otherwise -> False)
-        where
-            (Parser identy) = matchIdent
-            (Parser startIdenty) = matchIdentStart
-            checkMatches checker toCheck = case checker [toCheck] of
-                    (_, Right _) -> True
-                    _ -> False
+matchEscape = sequentiate (:) [matchChar '\\', satisfy (/= '\n')]
+
+checkWouldStartIdentSequence = sequentiate (++) [
+    matchString "-"
+    , pluralate matchIdentStart <|> matchString "-" <|> matchEscape
+    ]
+    <|> pluralate matchIdentStart
+    <|> matchEscape
 
 consumeIdentSequence = manyParser $ matchIdent <|> characterEscape
 
@@ -192,9 +209,102 @@ consumeHash = dropFirst <$> matchChar '#' <*> (Parser $ \ stream ->
         (_, Left _) -> (tail stream, Right $ DelimToken $ head stream))
     where
         dropFirst _ a = a
-        (Parser doHashy) = HashToken <$> ((,) <$> checkWouldStartIdentSequence <*> consumeIdentSequence)
+        (Parser doHashy) = HashToken <$> ((,) <$> passes checkWouldStartIdentSequence <*> consumeIdentSequence)
+
+consume matchy out char = mhm <$> matchy char
+    where mhm _ = out
+
+consumeCharacter = consume matchChar
+
+sequentiate f [] = pure []
+sequentiate f (p:ps) = (f) <$> p <*> sequentiate f ps
+
+makeOptional (Parser f) = Parser $ \ stream -> case f stream of
+    (rest, Right a) -> (rest, Right a)
+    (_, Left _) -> (stream, Right "")
+
+killMe (Parser other) (Parser this) = Parser $ \ stream -> case this stream of
+    (rest, Right a) -> (rest, Right a)
+    (rest, Left _) -> other rest
+
+checkDigit = NumberToken <$> ready (sequentiate (++) [
+    makeOptional (matchString "+" <|> matchString "-")
+    , wonky (someParser matchDigit) ((:) <$> matchChar '.' <*> someParser matchDigit)
+    , makeOptional $ sequentiate (++) [
+        (matchString "e" <|> matchString "E")
+        , makeOptional (matchString "+" <|> matchString "-") 
+        , someParser matchDigit
+        ]
+    ])
+    where 
+        ready (Parser f) = Parser $ \ stream -> case f stream of
+            (rest, Right []) -> (rest, Left "")
+            (rest, Right a) -> (rest, Right $ read $ go a)
+            (rest, Left err) -> (rest, Left err)
+
+            where go a = case a of
+                    ('.':str) -> go $ "0." ++ str
+                    ('+':str) -> go str
+                    _ -> a
+
+
+        wonky (Parser f) (Parser g) = Parser $ \ stream -> case f stream of
+            (rest, Right a) -> case g rest of
+                (rest', Right b) -> (rest', Right $ a ++ b)
+                (_, Left err) -> (rest, Right a)
+            (_, Left _) -> g stream
+
+consumeUrl = killMe (dropAll <$> manyParser (characterEscape <|> satisfy (/= ')')) <*> matchChar ')') $ UrlToken <$> parseUntil 
+    (characterEscape <|> satisfy (\ c -> not $ c `elem` "'\"("))
+    ((++) <$> manyParser matchWhitespace <*> matchString ")")
+    where dropAll _ _ = BadUrlToken
+
+consumeIdentLike = 
+    urly
+    <|> FunctionToken <$> (dropLast <$> consumeIdentSequence <*> matchChar '(')
+    <|> IdentToken <$> consumeIdentSequence
+    where 
+        urly = Parser $ \ stream -> case beginn stream of
+            (rest, Right _) -> case strart rest of
+                (_, Right _) -> (rest, Right $ FunctionToken "url")
+                (_, Left _) -> parse consumeUrl rest
+            (rest, Left err) -> (rest, Left err)
+        (Parser strart) = matchChar '\'' <|> matchChar '"'
+        (Parser beginn) = sequentiate (++) [
+            matchString "url("
+            , foldr (++) "" <$> manyParser (numParser 2 matchWhitespace)
+            , makeOptional $ pluralate matchWhitespace
+            ]
+        dropLast a _ = a
+
+eatByStart (Parser check) (Parser consumer) = Parser $ \ stream -> case check stream of
+    (_, Right _) -> consumer stream
+    (rest, Left err) -> (rest, Left err)
 
 parseString str =
     let preProcessed = preProcess str
-    in parse (manyParser (consumeWhitespace <|> consumeString '"' <|> consumeHash <|> consumeString '\'')) preProcessed
+    in parse (manyParser (
+                consumeWhitespace 
+                <|> consumeString '"' 
+                <|> consumeHash 
+                <|> consumeString '\'' 
+                <|> consumeCharacter OpeningParenthesisToken '('
+                <|> consumeCharacter ClosingParenthesisToken ')'
+                <|> checkDigit -- ahhhhhhhhh
+                <|> consumeCharacter CommaToken ','
+                <|> consume matchString CDCToken "->"
+                <|> consumeCharacter ColonToken ':'
+                <|> consumeCharacter SemicolonToken ';'
+                <|> consume matchString CDOToken "<!--"
+                <|> AtKeywordToken <$> eatByStart ((:) <$> matchChar '@' <*> checkWouldStartIdentSequence) consumeIdentSequence
+                <|> eatByStart matchEscape consumeIdentLike
+                <|> consumeCharacter OpeningSquareBracketToken '['
+                <|> consumeCharacter ClosingSquareBracketToken ']'
+                <|> consumeCharacter OpeningCurlyBracketToken '{'
+                <|> consumeCharacter ClosingCurlyBracketToken '}'
+                <|> eatByStart matchIdentStart consumeIdentLike
+                <|> Parser (\ stream -> case stream of
+                    [] -> ("", Left "end of stream")
+                    (c:str) -> (str, Right $ DelimToken c))
+            )) preProcessed
 
