@@ -150,28 +150,48 @@ matchNonAscii = satisfy (\ c -> ord c >= 0x80)
 matchIdentStart = matchLetter <|> matchNonAscii <|> matchChar '_'
 matchIdent = matchIdentStart <|> matchDigit <|> matchChar '-'
 
+matchHex = satisfy (`elem` "0123456789abcdefABCDEF")
+
 consumeWhitespace :: Parser CSSToken
 consumeWhitespace = whitespace <$> someParser matchWhitespace
     where whitespace _ = WhitespaceToken
 
-characterEscape = 
-    let 
-        (Parser backed) = matchChar '\\'
-        (Parser new) = matchChar '\n'
-        (Parser hex) = someParser (satisfy (`elem` "0123456789abcdef"))
-    in Parser $ \ stream -> case backed stream of
-        (rest, Right a) -> case new rest of
-            (rest', Right b) -> (rest', Right '\0')
-            (_, Left _) -> case hex rest of
-                (rest'', Right code) ->
-                    let
-                        translated = read $ "0x" ++ code
-                        (Parser white) = try matchWhitespace
-                    in if translated == 0
-                        then (fst $ white rest'', Right '\xfffd')
-                        else (fst $ white rest'', Right $ chr translated)
-                (_, Left _) -> (tail rest, Right $ head rest)
-        (rest, Left err) -> (rest, Left err)
+characterEscape :: Parser Char
+characterEscape = dropFirst <$>
+    matchChar '\\'
+    <*> (matchChar '\n'
+        <|> tracer <$> readIt <$> someParser matchHex
+        <|> (satisfy $ \ _ -> True))
+    where 
+        dropAll _ = '\0'
+        dropFirst _ a = a
+        dropLast a _ = a
+        readIt str =
+            let readed = read $ "0x" ++ str
+            in if readed == 0
+                then '\xfffd'
+                else chr readed
+
+-- characterEscape = 
+--     let 
+--         (Parser backed) = matchChar '\\'
+--         (Parser new) = matchChar '\n'
+--         (Parser hex) = someParser (satisfy (`elem` "0123456789abcdef"))
+--     in Parser $ \ stream -> case backed stream of
+--         (rest, Right a) -> case new rest of
+--             (rest', Right b) -> (rest', Right '\0')
+--             (_, Left _) -> case hex rest of
+--                 (rest'', Right code) ->
+--                     let
+--                         translated = read $ "0x" ++ code
+--                         (Parser white) = try matchWhitespace
+--                     in if translated == 0
+--                         then (fst $ white rest'', Right '\xfffd')
+--                         else (fst $ white rest'', Right $ chr translated)
+--                 (_, Left _) -> if null rest
+--                     then ("", Right '\0')
+--                     else (tail rest, Right $ head rest)
+--         (rest, Left err) -> (rest, Left err)
 
 eatStringInsides :: Char -> Parser CSSToken
 eatStringInsides endingCodePoint = Parser $ \ stream -> case go stream of
@@ -189,7 +209,10 @@ eatStringInsides endingCodePoint = Parser $ \ stream -> case go stream of
                     unreachable -> unreachable
 
 consumeString :: Char -> Parser CSSToken
-consumeString endingCodePoint = dropDels <$> matchChar endingCodePoint <*> eatStringInsides endingCodePoint <*> makeOptional (pluralate $ matchChar endingCodePoint)
+consumeString endingCodePoint = dropDels <$> 
+    matchChar endingCodePoint <*>
+    eatStringInsides endingCodePoint <*>
+    makeOptional (pluralate $ matchChar endingCodePoint)
     where dropDels _ a _ = a
 
 matchEscape = sequentiate (:) [matchChar '\\', satisfy (/= '\n')]
@@ -201,7 +224,7 @@ checkWouldStartIdentSequence = sequentiate (++) [
     <|> pluralate matchIdentStart
     <|> matchEscape
 
-consumeIdentSequence = manyParser $ matchIdent <|> characterEscape
+consumeIdentSequence = manyParser $ ( characterEscape) <|> matchIdent
 
 consumeHash = dropFirst <$> matchChar '#' <*> (Parser $ \ stream ->
     let (Parser check) = matchIdent <|> characterEscape
@@ -288,7 +311,7 @@ parseString str =
                 <|> consumeString '\'' 
                 <|> consumeCharacter OpeningParenthesisToken '('
                 <|> consumeCharacter ClosingParenthesisToken ')'
-                <|> checkDigit -- ahhhhhhhhh
+                <|> checkDigit
                 <|> consumeCharacter CommaToken ','
                 <|> consume matchString CDCToken "->"
                 <|> consumeCharacter ColonToken ':'
