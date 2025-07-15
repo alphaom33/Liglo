@@ -1,6 +1,6 @@
 {-# LANGUAGE MultiWayIf #-}
 
-module CSSParser where
+module CSSTokenizer where
 
 import Text.Regex.TDFA
 import Control.Applicative
@@ -179,16 +179,17 @@ eatStringInsides endingCodePoint = Parser $ \ stream -> case go stream of
         (rest, Right a) -> (rest, Right $ StringToken $ filter (/= '\0') a)
     where 
         (Parser regulari) = characterEscape <|> satisfy (/= endingCodePoint)
-        go stream = if head stream == '\n'
-            then (tail stream, Left "newline")
-            else case regulari stream of
+        go stream = case stream of
+            [] -> ("", Right [])
+            ('\n':rest) -> (rest, Left "newline")
+            _ -> case regulari stream of
                 (rest, Left err) -> (stream, Right [])
                 (rest, Right a) -> case go rest of
                     (rest', Right as) -> (rest', Right $ a : as)
                     unreachable -> unreachable
 
 consumeString :: Char -> Parser CSSToken
-consumeString endingCodePoint = dropDels <$> matchChar endingCodePoint <*> eatStringInsides endingCodePoint <*> matchChar endingCodePoint
+consumeString endingCodePoint = dropDels <$> matchChar endingCodePoint <*> eatStringInsides endingCodePoint <*> makeOptional (pluralate $ matchChar endingCodePoint)
     where dropDels _ a _ = a
 
 matchEscape = sequentiate (:) [matchChar '\\', satisfy (/= '\n')]
@@ -229,7 +230,7 @@ killMe (Parser other) (Parser this) = Parser $ \ stream -> case this stream of
 
 checkDigit = NumberToken <$> ready (sequentiate (++) [
     makeOptional (matchString "+" <|> matchString "-")
-    , wonky (someParser matchDigit) ((:) <$> matchChar '.' <*> someParser matchDigit)
+    , orAnd (someParser matchDigit) ((:) <$> matchChar '.' <*> someParser matchDigit)
     , makeOptional $ sequentiate (++) [
         (matchString "e" <|> matchString "E")
         , makeOptional (matchString "+" <|> matchString "-") 
@@ -241,14 +242,11 @@ checkDigit = NumberToken <$> ready (sequentiate (++) [
             (rest, Right []) -> (rest, Left "")
             (rest, Right a) -> (rest, Right $ read $ go a)
             (rest, Left err) -> (rest, Left err)
-
             where go a = case a of
                     ('.':str) -> go $ "0." ++ str
                     ('+':str) -> go str
                     _ -> a
-
-
-        wonky (Parser f) (Parser g) = Parser $ \ stream -> case f stream of
+        orAnd (Parser f) (Parser g) = Parser $ \ stream -> case f stream of
             (rest, Right a) -> case g rest of
                 (rest', Right b) -> (rest', Right $ a ++ b)
                 (_, Left err) -> (rest, Right a)

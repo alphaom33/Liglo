@@ -20,7 +20,7 @@ library Readle-lib
         Network
         HTMLParser
         HTMLBuilder
-        CSSParser
+        CSSTokenizer
         Item
         CharacterReferences
     hs-source-dirs: src

@@ -31,7 +31,7 @@ import qualified HTMLBuilder as H
 import Message (Message(NewSearch, NextPage, LastPage))
 import Network
 import HTMLParser
-import CSSParser as C
+import CSSTokenizer as C
 
 main = do
     -- args <- getArgs
@@ -51,5 +51,5 @@ main = do
     -- let result = parseString asdf
     -- writeFile "asdf.html" asdf
     -- defaultMain H.app $ H.initialState $ _emitted result
-    print $ C.parseString "+0.1"
+    print $ C.parseString "asonhua'bet{aas;}"
 
