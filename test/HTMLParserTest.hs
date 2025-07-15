@@ -1,4 +1,4 @@
-module Main where
+module HTMLParserTest where
 
 import Test.HUnit
 import qualified System.Exit as Exit
@@ -19,8 +19,3 @@ testSelfClosing = TestList $ [
 tests = TestList $ [
     TestLabel "TestSelfClosing" testSelfClosing
     ]
-
-main :: IO ()
-main = do
-    result <- runTestTT tests
-    if failures result > 0 then Exit.exitFailure else Exit.exitSuccess

@@ -83,7 +83,7 @@ pluralate p = ((:) <$> p <*> pure [])
 
 passes (Parser f) = Parser $ \ stream -> case f stream of
     (_, Right _) -> (stream, Right True)
-    (_, Left _) -> ("", Right False)
+    (_, Left _) -> (stream, Right False)
 
 replaceAll :: String -> String -> String -> String
 replaceAll regex toInsert str =
@@ -96,14 +96,15 @@ replaceAll regex toInsert str =
 killRegisteredNurse :: String -> String
 killRegisteredNurse = replaceAll "\r\n" "\n"
 
-killComments :: String -> String
-killComments = replaceAll "/\\*.*\\*/" ""
+consumeComment :: Parser CSSToken
+consumeComment = dropAll <$> matchString "/*" <*> manyParser (matchNotString "*/") <*> matchString "*/"
+    where dropAll _ _ _ = NothingToken
 
 preProcess str = map (\ c -> case c of -- also replace surrogates somehow
     '\r' -> '\n'
     '\f' -> '\n'
     '\0' -> '\xfffd'
-    _ -> c) $ killComments $ killRegisteredNurse str
+    _ -> c) $ killRegisteredNurse str
 
 data CSSToken =
     IdentToken String
@@ -117,7 +118,7 @@ data CSSToken =
     | DelimToken Char
     | NumberToken Float
     | PercentageToken Float
-    | DimensionToken Float
+    | DimensionToken (Float, String)
     | WhitespaceToken
     | CDOToken
     | CDCToken
@@ -130,6 +131,7 @@ data CSSToken =
     | ClosingParenthesisToken
     | OpeningCurlyBracketToken
     | ClosingCurlyBracketToken
+    | NothingToken
     deriving (Show, Eq)
 
 matchChar :: Char -> Parser Char
@@ -138,6 +140,14 @@ matchChar c = satisfy (== c)
 matchString :: String -> Parser String
 matchString [] = pure []
 matchString (c:cs) = (:) <$> matchChar c <*> matchString cs
+
+matchNotString :: String -> Parser String
+matchNotString str = Parser $ \ stream -> case eater stream of
+    (rest, Right a) -> if a == str
+        then (rest, Left "not match")
+        else (drop 1 stream, Right a)
+    (rest, Left err) -> (rest, Left err)
+    where (Parser eater) = numParser (length str) (satisfy $ \ _ -> True)
 
 matchWhitespace :: Parser Char
 matchWhitespace = matchChar '\n' <|> matchChar '\t' <|> matchChar ' '
@@ -203,7 +213,7 @@ checkWouldStartIdentSequence = sequentiate (++) [
     <|> pluralate matchIdentStart
     <|> matchEscape
 
-consumeIdentSequence = manyParser $ ( characterEscape) <|> matchIdent
+consumeIdentSequence = manyParser $ characterEscape <|> matchIdent
 
 consumeHash = dropFirst <$> matchChar '#' <*> (Parser $ \ stream ->
     let (Parser check) = matchIdent <|> characterEscape
@@ -230,7 +240,7 @@ killMe (Parser other) (Parser this) = Parser $ \ stream -> case this stream of
     (rest, Right a) -> (rest, Right a)
     (rest, Left _) -> other rest
 
-checkDigit = NumberToken <$> ready (sequentiate (++) [
+checkDigit = ready (sequentiate (++) [
     makeOptional (matchString "+" <|> matchString "-")
     , orAnd (someParser matchDigit) ((:) <$> matchChar '.' <*> someParser matchDigit)
     , makeOptional $ sequentiate (++) [
@@ -253,6 +263,12 @@ checkDigit = NumberToken <$> ready (sequentiate (++) [
                 (rest', Right b) -> (rest', Right $ a ++ b)
                 (_, Left err) -> (rest, Right a)
             (_, Left _) -> g stream
+
+consumeNumeric =
+    (DimensionToken <$> ((,) <$> checkDigit <*> eatByStart checkWouldStartIdentSequence consumeIdentSequence))
+    <|> (PercentageToken <$> (dropLast <$> checkDigit <*> matchChar '%'))
+    <|> (NumberToken <$> checkDigit)
+    where dropLast a _ = a
 
 consumeUrl = killMe (dropAll <$> manyParser (characterEscape <|> satisfy (/= ')')) <*> matchChar ')') $ UrlToken <$> parseUntil 
     (characterEscape <|> satisfy (\ c -> not $ c `elem` "'\"("))
@@ -283,14 +299,15 @@ eatByStart (Parser check) (Parser consumer) = Parser $ \ stream -> case check st
 
 parseString str =
     let preProcessed = preProcess str
-    in parse (manyParser (
-                consumeWhitespace 
+    in (parse (manyParser (
+                consumeComment
+                <|> consumeWhitespace 
                 <|> consumeString '"' 
                 <|> consumeHash 
                 <|> consumeString '\'' 
                 <|> consumeCharacter OpeningParenthesisToken '('
                 <|> consumeCharacter ClosingParenthesisToken ')'
-                <|> checkDigit
+                <|> consumeNumeric
                 <|> consumeCharacter CommaToken ','
                 <|> consume matchString CDCToken "->"
                 <|> consumeCharacter ColonToken ':'
@@ -306,5 +323,5 @@ parseString str =
                 <|> Parser (\ stream -> case stream of
                     [] -> ("", Left "end of stream")
                     (c:str) -> (str, Right $ DelimToken c))
-            )) preProcessed
+            )) preProcessed)
 

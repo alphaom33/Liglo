@@ -51,5 +51,6 @@ main = do
     -- let result = parseString asdf
     -- writeFile "asdf.html" asdf
     -- defaultMain H.app $ H.initialState $ _emitted result
-    print $ C.parseString "#0"
+    str <- readFile "asdf.css"
+    print $ C.parseString $ str
 

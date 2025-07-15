@@ -69,7 +69,10 @@ executable Readle
 
 test-suite tests
     type: exitcode-stdio-1.0
-    main-is: HTMLParserTest.hs
+    main-is: Main.hs
+    other-modules:
+        CSSTokenizerTest
+        HTMLParserTest
     build-depends:
         base >= 4.14,
         HUnit >= 1.6.2.0,
