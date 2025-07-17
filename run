@@ -1,2 +1,3 @@
 #!/bin/bash
+cabal configure --enable-executable-profiling
 cabal new-run Readle "$*" --ghc-options="-threaded"

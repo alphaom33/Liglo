@@ -31,7 +31,8 @@ import qualified HTMLBuilder as H
 import Message (Message(NewSearch, NextPage, LastPage))
 import Network
 import HTMLParser
-import CSSTokenizer as C
+import CSSTokenizer as CT
+import CSSParser as CP
 
 main = do
     -- args <- getArgs
@@ -52,5 +53,5 @@ main = do
     -- writeFile "asdf.html" asdf
     -- defaultMain H.app $ H.initialState $ _emitted result
     str <- readFile "asdf.css"
-    print $ C.parseString $ str
-
+    let out = CT.parseString $ str
+    writeFile "real.css" $ CP.outList "" "" $ CP.parseList $ fromRight [] $ snd $ out

@@ -132,7 +132,8 @@ data CSSToken =
     | OpeningCurlyBracketToken
     | ClosingCurlyBracketToken
     | NothingToken
-    deriving (Show, Eq)
+    | EOFToken
+    deriving (Show, Eq, Ord)
 
 matchChar :: Char -> Parser Char
 matchChar c = satisfy (== c)
@@ -297,9 +298,11 @@ eatByStart (Parser check) (Parser consumer) = Parser $ \ stream -> case check st
     (_, Right _) -> consumer stream
     (rest, Left err) -> (rest, Left err)
 
+postProcess out = filter (not . (`elem` [WhitespaceToken, NothingToken])) $ out ++ [EOFToken]
+
 parseString str =
     let preProcessed = preProcess str
-    in (parse (manyParser (
+    in  (parse (postProcess <$> manyParser (
                 consumeComment
                 <|> consumeWhitespace 
                 <|> consumeString '"' 

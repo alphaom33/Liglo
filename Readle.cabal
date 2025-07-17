@@ -21,6 +21,7 @@ library Readle-lib
         HTMLParser
         HTMLBuilder
         CSSTokenizer
+        CSSParser
         Item
         CharacterReferences
     hs-source-dirs: src
