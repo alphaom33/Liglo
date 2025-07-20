@@ -31,11 +31,11 @@ import qualified HTMLBuilder as H
 import Message (Message(NewSearch, NextPage, LastPage))
 import Network
 import HTMLParser
-import CSSTokenizer as CT
-import CSSParser as CP
+import qualified CSSTokenizer as CT
+import qualified CSSParser as CP
 
 main = do
-    -- args <- getArgs
+    args <- getArgs
     -- let arged = map (\ c -> if c == ' ' then '+' else c) $ concat args
     -- key <- lookupEnv "GOOGLE_API_KEY"
     -- let apiKey = fromJust key
@@ -44,14 +44,17 @@ main = do
     -- when (S._curQuery finalState == args!!0) (do
     --     print "exited forcefully"
     --     exitSuccess)
-    --
+ 
 
     -- a <- parseRequest $ "https://hoogle.haskell.org?hoogle=map"--S._curQuery finalState
     -- b <- httpLBS a
     -- let asdf = unpack (getResponseBody b)
-    -- let result = parseString asdf
+    asdf <- readFile "asdf.html"
+    let result = parseString asdf
     -- writeFile "asdf.html" asdf
-    -- defaultMain H.app $ H.initialState $ _emitted result
+    defaultMain H.app $ H.initialState $ _emitted result
+
     str <- readFile "asdf.css"
     let out = CT.parseString $ str
     writeFile "real.css" $ CP.outList "" "" $ CP.parseList $ fromRight [] $ snd $ out
+

@@ -10,7 +10,7 @@ import HTMLParser (tracer)
 
 import Data.Map ((!), fromList)
 
-data CurlyBlock = CurlyBlock [ComponentValue] deriving (Show, Eq)
+data CurlyBlock = CurlyBlock [ComponentValue] [ComponentValue] deriving (Show, Eq)
 data SquareBlock = SquareBlock [ComponentValue] deriving (Show, Eq)
 data ParenthesisBlock = ParenthesisBlock [ComponentValue] deriving (Show, Eq)
 
@@ -60,17 +60,22 @@ consumeFunction s = go [] state
         ((FunctionToken name):state) = s
 
 consumeComponentValue :: [CSSToken] -> (ComponentValue, [CSSToken])
-consumeComponentValue state = case nextInputToken of
-    OpeningCurlyBracketToken -> consumeSimpleBlock state
-    OpeningSquareBracketToken -> consumeSimpleBlock state
-    OpeningParenthesisToken -> consumeSimpleBlock state
-    (FunctionToken _) -> consumeFunction state
-    _ -> (PreservedValue nextInputToken, state')
+consumeComponentValue state = go [] state
     where
-        (nextInputToken:state') = state
+        go tokens state = case nextInputToken of
+            OpeningCurlyBracketToken -> consumeSimpleBlock (reverse tokens) state
+            OpeningSquareBracketToken -> consumeSimpleBlock (reverse tokens) state
+            OpeningParenthesisToken -> consumeSimpleBlock (reverse tokens) state
+            (FunctionToken _) -> consumeFunction state
+            _ -> if nextnextInputToken == EOFToken
+                then (PreservedValue nextInputToken, state')
+                else go (PreservedValue nextInputToken : tokens) state'
+            where
+                (nextInputToken:state') = state
+                (nextnextInputToken:_) = state'
 
-consumeSimpleBlock :: [CSSToken] -> (ComponentValue, [CSSToken])
-consumeSimpleBlock s = 
+consumeSimpleBlock :: [ComponentValue] -> [CSSToken] -> (ComponentValue, [CSSToken])
+consumeSimpleBlock tokens s = 
     let (val, state') = go [] state
     in (SimpleBlockValue $ (startToConstructor ! startingToken) $ reverse val, state')
     where
@@ -86,7 +91,7 @@ consumeSimpleBlock s =
             , (OpeningParenthesisToken, ClosingParenthesisToken)
             ]
         startToConstructor = fromList [
-            (OpeningCurlyBracketToken, SimpleCurlyBlock . CurlyBlock)
+            (OpeningCurlyBracketToken, SimpleCurlyBlock . (CurlyBlock tokens))
             , (OpeningSquareBracketToken, SimpleSquareBlock . SquareBlock)
             , (OpeningParenthesisToken, SimpleParenthesisBlock . ParenthesisBlock)
             ]
@@ -99,7 +104,7 @@ consumeQualifiedRule state = go [] state
         go prelude state = case nextInputToken of
             EOFToken -> (Nothing, state)
             OpeningCurlyBracketToken -> 
-                let ((SimpleBlockValue (SimpleCurlyBlock val)), state'') = consumeSimpleBlock state
+                let ((SimpleBlockValue (SimpleCurlyBlock val)), state'') = consumeSimpleBlock [] state
                 in (Just QualifiedRule {qualifiedPrelude=prelude, qualifiedBlock=val}, state'')
             _ -> let (val, state'') = consumeComponentValue state in go (val:prelude) state''
             where
@@ -112,7 +117,7 @@ consumeAtRule s = go [] state
         go prelude state = case nextInputToken of
             SemicolonToken -> (attish Nothing, state')
             EOFToken -> (attish Nothing, state)
-            OpeningCurlyBracketToken -> let ((SimpleBlockValue (SimpleCurlyBlock val)), state'') = consumeSimpleBlock state in (attish (Just val), state'')
+            OpeningCurlyBracketToken -> let ((SimpleBlockValue (SimpleCurlyBlock val)), state'') = consumeSimpleBlock [] state in (attish (Just val), state'')
             _ -> let (val, state'') = consumeComponentValue state in go (val:prelude) state''
             where
                 attish block = AtRule {atName=name, atPrelude=prelude, atBlock=block}
@@ -240,9 +245,10 @@ outList out delim (val:rest) = outList (out ++ (case val of
     (PreservedValue (DimensionToken (n, d))) -> show n ++ d
     (PreservedValue (PercentageToken n)) -> show n ++ "%"
     (PreservedValue (HashToken (id, n))) -> "#" ++ n
-    (SimpleBlockValue (SimpleCurlyBlock (CurlyBlock c))) -> " {\n" ++ replaceAll "\n" "\n\t" (outList "\t" "" c) ++ "}\n\n"
+    (SimpleBlockValue (SimpleCurlyBlock (CurlyBlock t c))) -> outList "" "" t ++ " {\n" ++ replaceAll "\n" "\n\t" (outList "\t" "" c) ++ "}\n\n"
     (SimpleBlockValue (SimpleSquareBlock (SquareBlock c))) -> "[" ++ outList "" "" c ++ "]"
     (SimpleBlockValue (SimpleParenthesisBlock (ParenthesisBlock c))) -> "(" ++ outList "" "" c ++ ")"
     (DeclarationValue (Declaration n v i)) -> n ++ ": " ++ outList "" " " v ++ (if i then "!important" else "") ++ ";\n"
     _ -> show val
     ) ++ delim) delim rest
+

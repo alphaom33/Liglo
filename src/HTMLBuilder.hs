@@ -39,22 +39,32 @@ builderData emittedTokens = BuilderData {_openTags=[], _out=[], _toRead=emittedT
 data State = State {
     _emittedTokens :: [Token]
     , _hotkey :: String
-} deriving (Show)
+    , _built :: [Widget Name]
+}
 $(makeLenses ''State)
 
-hotkeys :: Map String (EventM Name State ())
+hotkeys :: Map String (Int -> EventM Name State ())
 hotkeys = fromList [
-    ("j", let vp = viewportScroll Viewport1 in vScrollBy vp (1))
-    , ("k", let vp = viewportScroll Viewport1 in vScrollBy vp (-1))
-    , ("u", let vp = viewportScroll Viewport1 in vScrollPage vp Up)
-    , ("d", let vp = viewportScroll Viewport1 in vScrollPage vp Down)
-    , ("gg", let vp = viewportScroll Viewport1 in vScrollToBeginning vp)
-    , ("G", let vp = viewportScroll Viewport1 in vScrollToEnd vp)
-    , ("q", halt)
+    ("j", repeatify $ let vp = viewportScroll Viewport1 in vScrollBy vp (1))
+    , ("k", repeatify $ let vp = viewportScroll Viewport1 in vScrollBy vp (-1))
+    , ("u", repeatify $ let vp = viewportScroll Viewport1 in vScrollPage vp Up)
+    , ("d", repeatify $ let vp = viewportScroll Viewport1 in vScrollPage vp Down)
+    , ("gg", \ n -> do
+        let vp = viewportScroll Viewport1 in vScrollToBeginning vp
+        let vp = viewportScroll Viewport1 in vScrollBy vp n)
+    , ("G", discard $ let vp = viewportScroll Viewport1 in vScrollToEnd vp)
+    , ("q", discard halt)
     ]
+    where 
+        discard e _ = e
+
+        repeatify e 0 = e
+        repeatify e num = do
+            e
+            repeatify e (num - 1)
 
 buildHtml :: State -> [Widget Name]
-buildHtml state = [viewport Viewport1 Vertical $ vBox $ _out $ _buildHtml $ builderData $ _emittedTokens state]
+buildHtml state = [viewport Viewport1 Vertical $ vBox $ _built state]
 
 _buildHtml :: BuilderData -> BuilderData
 
@@ -76,8 +86,8 @@ _buildHtml mhm = case _toRead mhm of
                 where mhm' = set currentText "" mhm
     (Character c:emittedTokens) -> _buildHtml $ (if c `elem` " \n\t"
         then killWhitespace
-        else if length (_openTags mhm) > 0 && null (["head", "meta", "link", "script", "style", "select"] `intersect` _openTags mhm)
-            then \ mhm -> over currentText (c:) mhm
+        else if not (null (_openTags mhm)) && null (["head", "meta", "link", "script", "style", "select"] `intersect` _openTags mhm)
+            then over currentText (c:)
             else id) mhm'
     (e:emittedTokens) -> _buildHtml mhm'
     [] -> mhm
@@ -99,6 +109,7 @@ initialState :: [Token] -> State
 initialState p_emittedTokens = State {
     _emittedTokens = p_emittedTokens
     , _hotkey = ""
+    , _built = _out $ _buildHtml $ builderData $ p_emittedTokens
 }
 
 start :: EventM Name State ()
@@ -110,11 +121,22 @@ handler (VtyEvent (EvKey k m)) = case k of
     (KChar c) -> do
         hotkey %= (((if MShift `elem` m then toUpper else id) c):)
         _hotkey <- use hotkey
-        when (_hotkey `elem` (keys hotkeys)) (do
+        let (num, exec) = splitNum $ reverse _hotkey
+        when (exec `elem` (keys hotkeys)) (do
             hotkey .= ""
-            hotkeys ! _hotkey)
+            (hotkeys ! exec) $ num)
     KEsc -> hotkey .= ""
     _ -> return ()
+    where
+        splitNum :: String -> (Int, String)
+        splitNum str = let (num, exec) = go str in if null num
+            then (0, exec)
+            else (read num - 1, exec)
+            where
+                go [] = ("", "")
+                go (c:cs) = if c `elem` "0123456789"
+                    then let (one, two) = go cs in (c : one, two)
+                    else ("", c:cs)
 
 handler _ = return ()
 
