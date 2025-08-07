@@ -5,6 +5,7 @@ import qualified Webpage
 import qualified SearchApp
 import qualified HTMLParser
 
+import Data.Tree
 import System.Exit
 import System.Environment (getArgs, lookupEnv)
 import Brick as B
@@ -35,7 +36,7 @@ import qualified CSSTokenizer as CT
 import qualified CSSParser as CP
 
 main = do
-    args <- getArgs
+    -- args <- getArgs
     -- let arged = map (\ c -> if c == ' ' then '+' else c) $ concat args
     -- key <- lookupEnv "GOOGLE_API_KEY"
     -- let apiKey = fromJust key
@@ -56,5 +57,4 @@ main = do
     let out = CT.parseString $ str
     let outer = CP.parseList $ fromRight [] $ snd out
 
-    print $ H.countCSSTree 0 (H.buildCSSTree outer)
-    -- defaultMain H.app $ H.initialState outer $ _emitted result
+    defaultMain H.app $ H.initialState outer $ _emitted result
