@@ -158,7 +158,7 @@ matchUppercaseLetter = satisfy (`elem` "ABCDEFGHIJKLMNOPQRSTUVWXYZ")
 matchLowercaseLetter = satisfy (`elem` "abcdefghijklmnopqrstuvwxyz")
 matchLetter = matchUppercaseLetter <|> matchLowercaseLetter
 matchNonAscii = satisfy (\ c -> ord c >= 0x80)
-matchIdentStart = matchLetter <|> matchNonAscii <|> matchChar '_'
+matchIdentStart = matchLetter <|> matchNonAscii <|> matchChar '_' <|> matchChar '.'
 matchIdent = matchIdentStart <|> matchDigit <|> matchChar '-'
 
 matchHex = satisfy (`elem` "0123456789abcdefABCDEF")

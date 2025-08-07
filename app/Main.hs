@@ -51,10 +51,10 @@ main = do
     -- let asdf = unpack (getResponseBody b)
     asdf <- readFile "asdf.html"
     let result = parseString asdf
-    -- writeFile "asdf.html" asdf
-    defaultMain H.app $ H.initialState $ _emitted result
 
     str <- readFile "asdf.css"
     let out = CT.parseString $ str
-    writeFile "real.css" $ CP.outList "" "" $ CP.parseList $ fromRight [] $ snd $ out
+    let outer = CP.parseList $ fromRight [] $ snd out
 
+    print $ H.countCSSTree 0 (H.buildCSSTree outer)
+    -- defaultMain H.app $ H.initialState outer $ _emitted result

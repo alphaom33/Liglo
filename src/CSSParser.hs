@@ -10,7 +10,15 @@ import HTMLParser (tracer)
 
 import Data.Map ((!), fromList)
 
-data CurlyBlock = CurlyBlock [ComponentValue] [ComponentValue] deriving (Show, Eq)
+data Selector =
+    TagSelector String
+    | HashSelector String
+    | ClassSelector String
+    | StateSelector String String
+    | StarSelector
+    deriving (Show, Eq)
+
+data CurlyBlock = CurlyBlock [[Selector]] [ComponentValue] deriving (Show, Eq)
 data SquareBlock = SquareBlock [ComponentValue] deriving (Show, Eq)
 data ParenthesisBlock = ParenthesisBlock [ComponentValue] deriving (Show, Eq)
 
@@ -32,6 +40,7 @@ data ComponentValue =
     | SimpleBlockValue SimpleBlock
     | DeclarationValue Declaration
     | RuleValue Rule
+    | SelectorValue Selector
     deriving (Show, Eq)
 
 data Rule = 
@@ -84,17 +93,42 @@ consumeSimpleBlock tokens s =
             then (fst $ consumeListOfDeclarations (reverse $ EOFToken : out), state')
             else go (nextInputToken:out) state'
             where (nextInputToken:state') = state
+
         endingToken = startToEnd ! startingToken 
+
         startToEnd = fromList [
             (OpeningCurlyBracketToken, ClosingCurlyBracketToken)
             , (OpeningSquareBracketToken, ClosingSquareBracketToken)
             , (OpeningParenthesisToken, ClosingParenthesisToken)
             ]
+
+        parseTokenList :: [[Selector]] -> [Selector] -> [ComponentValue] -> [[Selector]]
+        parseTokenList out currentList tokens = case tokens of
+            [] -> reverse $ if null currentList
+                then out
+                else addCurrentList
+            ((PreservedValue (DelimToken '*')) : rest) -> parseTokenList out (StarSelector : currentList) rest
+            ((PreservedValue locator) : (PreservedValue ColonToken) : (PreservedValue pseudoClass) : rest) -> 
+                parseTokenList out ((StateSelector (grabStr locator) (grabStr pseudoClass)) : currentList) rest
+                where 
+                    grabStr token = case token of
+                        (IdentToken s) -> s
+                        (HashToken (_, s)) -> s
+            ((PreservedValue nextToken) : rest) -> case nextToken of
+                (IdentToken n) -> parseTokenList out ((case n of
+                    ('.':_) -> ClassSelector n
+                    _ -> TagSelector n) : currentList) rest
+                (HashToken (_, n)) -> parseTokenList out (HashSelector n : currentList) rest
+                CommaToken -> parseTokenList addCurrentList [] rest
+            where
+                addCurrentList = reverse currentList : out
+
         startToConstructor = fromList [
-            (OpeningCurlyBracketToken, SimpleCurlyBlock . (CurlyBlock tokens))
+            (OpeningCurlyBracketToken, SimpleCurlyBlock . (CurlyBlock $ parseTokenList [] [] tokens))
             , (OpeningSquareBracketToken, SimpleSquareBlock . SquareBlock)
             , (OpeningParenthesisToken, SimpleParenthesisBlock . ParenthesisBlock)
             ]
+
         (startingToken:state) = s
 
 consumeQualifiedRule :: [CSSToken] -> (Maybe Rule, [CSSToken])
@@ -210,6 +244,7 @@ consumeListOfDeclarations :: [CSSToken] -> ([ComponentValue], [CSSToken])
 consumeListOfDeclarations state = go [] state
     where
         go :: [ComponentValue] -> [CSSToken] -> ([ComponentValue], [CSSToken])
+        go list [] = (list, [EOFToken])
         go list state = case nextInputToken of
             WhitespaceToken -> go list state'
             SemicolonToken -> go list state'
@@ -228,6 +263,7 @@ _parseList out state = if nextInputToken == EOFToken
     else let (val, state') = consumeComponentValue state in _parseList (val:out) state'
     where nextInputToken = state!!0
 
+outList :: String -> String -> [ComponentValue] -> String
 outList out _ [] = out
 outList out delim (val:rest) = outList (out ++ (case val of
     (PreservedValue ColonToken) -> ":"
@@ -245,10 +281,14 @@ outList out delim (val:rest) = outList (out ++ (case val of
     (PreservedValue (DimensionToken (n, d))) -> show n ++ d
     (PreservedValue (PercentageToken n)) -> show n ++ "%"
     (PreservedValue (HashToken (id, n))) -> "#" ++ n
-    (SimpleBlockValue (SimpleCurlyBlock (CurlyBlock t c))) -> outList "" "" t ++ " {\n" ++ replaceAll "\n" "\n\t" (outList "\t" "" c) ++ "}\n\n"
+    (SimpleBlockValue (SimpleCurlyBlock (CurlyBlock t c))) -> foldr (\ t -> ((outList "" "" (map SelectorValue t) ++ ",") ++)) "" t ++ " {\n" ++ replaceAll "\n" "\n\t" (outList "\t" "" c) ++ "}\n\n"
     (SimpleBlockValue (SimpleSquareBlock (SquareBlock c))) -> "[" ++ outList "" "" c ++ "]"
     (SimpleBlockValue (SimpleParenthesisBlock (ParenthesisBlock c))) -> "(" ++ outList "" "" c ++ ")"
     (DeclarationValue (Declaration n v i)) -> n ++ ": " ++ outList "" " " v ++ (if i then "!important" else "") ++ ";\n"
+    (SelectorValue (TagSelector s)) -> ' ' : s
+    (SelectorValue (HashSelector s)) -> ' ' : s
+    (SelectorValue (ClassSelector s)) -> ' ' : s
+    (SelectorValue (StateSelector s l)) -> ' ' : s ++ ':' : l
     _ -> show val
     ) ++ delim) delim rest
 
