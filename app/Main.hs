@@ -35,13 +35,15 @@ import HTMLParser
 import qualified CSSTokenizer as CT
 import qualified CSSParser as CP
 
+import Mortar
+
 main = do
     -- args <- getArgs
     -- let arged = map (\ c -> if c == ' ' then '+' else c) $ concat args
     -- key <- lookupEnv "GOOGLE_API_KEY"
     -- let apiKey = fromJust key
     -- finalState <- defaultMain S.app $ S.initialState apiKey (args!!0)
-    --
+
     -- when (S._curQuery finalState == args!!0) (do
     --     print "exited forcefully"
     --     exitSuccess)
@@ -50,11 +52,13 @@ main = do
     -- a <- parseRequest $ "https://hoogle.haskell.org?hoogle=map"--S._curQuery finalState
     -- b <- httpLBS a
     -- let asdf = unpack (getResponseBody b)
-    asdf <- readFile "asdf.html"
-    let result = parseString asdf
+    -- asdf <- readFile "asdf.html"
+    -- let result = parseString asdf
 
-    str <- readFile "asdf.css"
-    let out = CT.parseString $ str
-    let outer = CP.parseList $ fromRight [] $ snd out
+    -- str <- readFile "asdf.css"
+    -- let out = CT.parseString $ str
+    -- let outer = CP.parseList $ fromRight [] $ snd out
+    -- defaultMain H.app $ H.initialState outer $ _emitted result
 
-    defaultMain H.app $ H.initialState outer $ _emitted result
+    appIt "ack ack ack ack ack ack ack ack ack ack ack ack ack ack ack ack ack ack ack ack ack ack ack ack ack ack ack ack ack ack ack ack ack ack ack ack ack ack ack ack ack ack ack ack ack ack ack ack ack ack ack ack ack ack ack ack ack ack ack ack ack ack ack ack ack ack ack ack ack ack ack ack ack ack ack ack ack ack ack ack ack ack ack ack ack ack ack ack ack ack ack ack ack ack ack ack ack ack ack ack ack\nack\nack\nack\nack\nack\nack\nack\nack\nack\nack\nack\nack\nack\nack\nca\nca\nca\nca\nca\nca\nca\nca\nca\nca\nca\nca\nback\nback\nback\nback\nback\nback\nback\nback\nback\nback\nback\nback\nash\nash\nash\nash\nash\nash\nash\nash\nash\nash\nash\nash\nash\nash\nash\nasdf\nbsdf\ncsdf" initialState
+

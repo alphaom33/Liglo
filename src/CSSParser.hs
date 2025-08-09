@@ -116,7 +116,7 @@ consumeSimpleBlock tokens s =
                         (HashToken (_, s)) -> s
             ((PreservedValue nextToken) : rest) -> case nextToken of
                 (IdentToken n) -> parseTokenList out ((case n of
-                    ('.':_) -> ClassSelector n
+                    ('.':n) -> ClassSelector n
                     _ -> TagSelector n) : currentList) rest
                 (HashToken (_, n)) -> parseTokenList out (HashSelector n : currentList) rest
                 CommaToken -> parseTokenList addCurrentList [] rest

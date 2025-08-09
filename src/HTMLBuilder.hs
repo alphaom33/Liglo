@@ -17,10 +17,6 @@ import Graphics.Vty as V
 
 import Text.Wrap
 
-import Brick.AttrMap (attrMap)
-import Brick.Widgets.Center (center, vCenter, hCenter)
-import Brick.Widgets.Border (border)
-
 import Lens.Micro.Mtl ((.=), (%=), use, view)
 import Lens.Micro.TH (makeLenses)
 import Lens.Micro (set, over)
@@ -32,25 +28,24 @@ import Message
 import CSSParser
 import CSSTokenizer
 
-type CSSAttribute = Maybe (Widget Name) -> Maybe (Widget Name)
+type CSSAttribute = Maybe String -> Maybe String
 type PreSelectorNode = (Selector, [ComponentValue])
 type SelectorNode = ([Selector], [ComponentValue])
 
 data BuilderData = BuilderData {
     _toRead :: [Token]
     , _openTags :: [Tag]
-    , _out :: [Widget Name]
-    , _currentHBox :: [Widget Name]
+    , _out :: String
     , _currentText :: String
     , _style :: Tree (Selector, CSSAttribute)
 }
 $(makeLenses ''BuilderData)
-builderData emittedTokens style = BuilderData {_openTags=[], _out=[], _toRead=emittedTokens, _currentHBox=[], _currentText="", _style=style}
+builderData emittedTokens style = BuilderData {_openTags=[], _toRead=emittedTokens, _out="", _currentText="", _style=style}
 
 data State = State {
     _emittedTokens :: [Token]
     , _hotkey :: String
-    , _built :: [Widget Name]
+    , _built :: String
     , _css :: [ComponentValue]
 }
 $(makeLenses ''State)
@@ -75,19 +70,19 @@ hotkeys = fromList [
             e
             repeatify e (num - 1)
 
-makeWidget :: Tag -> BuilderData -> Maybe (Widget Name)
-makeWidget t mhm = _makeWidget t mhm $ Just $ (str $ reverse $ _currentText mhm)
+makeWidget :: Tag -> BuilderData -> Maybe String
+makeWidget t mhm = _makeWidget t mhm $ Just $ reverse $ _currentText mhm
 
-_makeWidget :: Tag -> BuilderData -> Maybe (Widget Name) -> Maybe (Widget Name)
+_makeWidget :: Tag -> BuilderData -> Maybe String -> Maybe String
 _makeWidget t mhm out = applyStyle "" (_openTags mhm) (_style mhm) out
     where
         getAttr :: String -> Maybe Attribute
         getAttr name = (filter (\ (Attribute (n, _)) -> n == name) (_attrs t)) L.!? 0
 
-        applyStyle :: String -> [Tag] -> Tree (Selector, CSSAttribute) -> Maybe (Widget Name) -> Maybe (Widget Name)
+        applyStyle :: String -> [Tag] -> Tree (Selector, CSSAttribute) -> Maybe String -> Maybe String
         applyStyle depth [] css out = out
         applyStyle depth (tag : tags) (Node (selector, value) children) out = case selector of
-            StarSelector -> foldr (applyStyle "" (tag:tags)) (value $ fmap (withAttr (attrName "*")) out) children
+            StarSelector -> foldr (applyStyle "" (tag:tags)) (value out) children
             (TagSelector n) -> checkStyleApply n n (_tagName tag) out
             (HashSelector n) -> checkStyleApply ('#':n) n (fromMaybe "" $ fmap (\ (Attribute (_, v)) -> v) $ getAttr "id") out
             (ClassSelector n) ->
@@ -96,11 +91,8 @@ _makeWidget t mhm out = applyStyle "" (_openTags mhm) (_style mhm) out
             (StateSelector n1 n2) -> out
             where
                 checkStyleApply prefix check val out = if check == val
-                    then foldr (applyStyle (depth ++ prefix) tags) (value $ fmap (withAttr (attrName $ depth ++ prefix)) out) children
+                    then foldr (applyStyle (depth ++ prefix) tags) (value out) children
                     else out
-
-buildHtml :: State -> [Widget Name]
-buildHtml state = [viewport Viewport1 Vertical $ vBox $ _built state]
 
 _buildHtml :: BuilderData -> BuilderData
 
@@ -117,7 +109,7 @@ _buildHtml mhm = case _toRead mhm of
         where
             appendWidget t mhm = case makeWidget t mhm of
                 Nothing -> mhm
-                (Just w) -> over currentHBox (++[w]) $ killText mhm
+                (Just w) -> over out (++w) $ killText mhm
             endings t mhm = if _tagName t `elem` ["li", "h1", "h2", "h3", "h4", "h5", "h6", "p", "pre", "div"]
                 then appendHbox $ appendWidget t mhm
                 else appendWidget t mhm
@@ -132,10 +124,10 @@ _buildHtml mhm = case _toRead mhm of
     where 
         (next, mhm') = (_toRead mhm !! 0, over toRead (drop 1) mhm)
 
-        appendHbox mhm = over out (++[hBox $ _currentHBox mhm]) $ set currentHBox [] $ killText mhm
+        appendHbox mhm = over out (++"\n") $ killText mhm
         killText = set currentText ""
 
-killWhitespace mhm = _killWhitespace $ (if null (_out mhm) || (null (_currentText mhm) && null (_currentHBox mhm))
+killWhitespace mhm = _killWhitespace $ (if null (_out mhm) || null (_currentText mhm)
     then id
     else over currentText (' ' :)) mhm
 
@@ -280,13 +272,3 @@ countCSSTree :: Int -> Tree (Selector, CSSAttribute) -> Int
 countCSSTree out tree = case subForest tree of
     [] -> 1
     _ -> foldr ((+) . (countCSSTree 0)) out (subForest tree)
-
-app :: App State Message Name
-app = App {
-    appStartEvent = start
-    , appChooseCursor = neverShowCursor
-    , appDraw = buildHtml
-    , appHandleEvent = handler
-    , appAttrMap = buildCSS
-    }
-
