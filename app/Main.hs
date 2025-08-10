@@ -52,13 +52,13 @@ main = do
     -- a <- parseRequest $ "https://hoogle.haskell.org?hoogle=map"--S._curQuery finalState
     -- b <- httpLBS a
     -- let asdf = unpack (getResponseBody b)
-    -- asdf <- readFile "asdf.html"
-    -- let result = parseString asdf
+    asdf <- readFile "asdf.html"
+    let result = parseString asdf
 
-    -- str <- readFile "asdf.css"
-    -- let out = CT.parseString $ str
-    -- let outer = CP.parseList $ fromRight [] $ snd out
-    -- defaultMain H.app $ H.initialState outer $ _emitted result
+    str <- readFile "asdf.css"
+    let out = CT.parseString $ str
+    let outer = CP.parseList $ fromRight [] $ snd out
+    let outest = H.parseWebpage (_emitted result) outer
 
-    appIt "ack ack ack ack ack ack ack ack ack ack ack ack ack ack ack ack ack ack ack ack ack ack ack ack ack ack ack ack ack ack ack ack ack ack ack ack ack ack ack ack ack ack ack ack ack ack ack ack ack ack ack ack ack ack ack ack ack ack ack ack ack ack ack ack ack ack ack ack ack ack ack ack ack ack ack ack ack ack ack ack ack ack ack ack ack ack ack ack ack ack ack ack ack ack ack ack ack ack ack ack ack\nack\nack\nack\nack\nack\nack\nack\nack\nack\nack\nack\nack\nack\nack\nca\nca\nca\nca\nca\nca\nca\nca\nca\nca\nca\nca\nback\nback\nback\nback\nback\nback\nback\nback\nback\nback\nback\nback\nash\nash\nash\nash\nash\nash\nash\nash\nash\nash\nash\nash\nash\nash\nash\nasdf\nbsdf\ncsdf" initialState
+    Mortar.appIt outest Mortar.initialState
 

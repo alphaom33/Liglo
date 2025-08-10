@@ -38,6 +38,7 @@ initialState = State {
     , _inputList = ""
 }
 
+getEscapeSequence str = '\x1b' : '[' : str
 putEscapeSequence str = putStr $ '\x1b' : '[' : str
 
 hideCursor = putEscapeSequence "?25l"
@@ -47,11 +48,15 @@ resetCursor = putEscapeSequence "H"
 
 clearScreen = do
     putEscapeSequence "2J"
-    putEscapeSequence "H"
+    resetCursor
 
-setForegroundColor r g b = putEscapeSequence $ "38;2;" ++ show r ++ ";" ++ show g ++ ";" ++ show b ++ "m"
-setBackgroundColor r g b = putEscapeSequence $ "48;2;" ++ show r ++ ";" ++ show g ++ ";" ++ show b ++ "m"
-resetBackground = putEscapeSequence "49m"
+setForegroundColor r g b = getEscapeSequence $ "38;2;" ++ show r ++ ";" ++ show g ++ ";" ++ show b ++ "m"
+setBackgroundColor r g b = getEscapeSequence $ "48;2;" ++ show r ++ ";" ++ show g ++ ";" ++ show b ++ "m"
+
+surroundForegroundColor r g b s = setForegroundColor r g b ++ s ++ setForegroundColor 255 255 255
+surroundBackgroundColor r g b s = setBackgroundColor r g b ++ s ++ resetBackground
+
+resetBackground = getEscapeSequence "49m"
 
 bold = putEscapeSequence "1m"
 italic = putEscapeSequence "3m"

@@ -12,9 +12,6 @@ import Control.Monad (when)
 import Data.Tree
 import Data.Maybe
 
-import Brick
-import Graphics.Vty as V
-
 import Text.Wrap
 
 import Lens.Micro.Mtl ((.=), (%=), use, view)
@@ -27,6 +24,7 @@ import SearchApp (Name(..))
 import Message
 import CSSParser
 import CSSTokenizer
+import qualified Mortar
 
 type CSSAttribute = Maybe String -> Maybe String
 type PreSelectorNode = (Selector, [ComponentValue])
@@ -42,57 +40,29 @@ data BuilderData = BuilderData {
 $(makeLenses ''BuilderData)
 builderData emittedTokens style = BuilderData {_openTags=[], _toRead=emittedTokens, _out="", _currentText="", _style=style}
 
-data State = State {
-    _emittedTokens :: [Token]
-    , _hotkey :: String
-    , _built :: String
-    , _css :: [ComponentValue]
-}
-$(makeLenses ''State)
-
-hotkeys :: Map String (Int -> EventM Name State ())
-hotkeys = fromList [
-    ("j", repeatify $ let vp = viewportScroll Viewport1 in vScrollBy vp (1))
-    , ("k", repeatify $ let vp = viewportScroll Viewport1 in vScrollBy vp (-1))
-    , ("u", repeatify $ let vp = viewportScroll Viewport1 in vScrollPage vp Up)
-    , ("d", repeatify $ let vp = viewportScroll Viewport1 in vScrollPage vp Down)
-    , ("gg", \ n -> do
-        let vp = viewportScroll Viewport1 in vScrollToBeginning vp
-        let vp = viewportScroll Viewport1 in vScrollBy vp n)
-    , ("G", discard $ let vp = viewportScroll Viewport1 in vScrollToEnd vp)
-    , ("q", discard halt)
-    ]
-    where 
-        discard e _ = e
-
-        repeatify e 0 = e
-        repeatify e num = do
-            e
-            repeatify e (num - 1)
-
 makeWidget :: Tag -> BuilderData -> Maybe String
 makeWidget t mhm = _makeWidget t mhm $ Just $ reverse $ _currentText mhm
 
 _makeWidget :: Tag -> BuilderData -> Maybe String -> Maybe String
-_makeWidget t mhm out = applyStyle "" (_openTags mhm) (_style mhm) out
-    where
-        getAttr :: String -> Maybe Attribute
-        getAttr name = (filter (\ (Attribute (n, _)) -> n == name) (_attrs t)) L.!? 0
+_makeWidget t mhm out = applyStyle (_openTags mhm) (_style mhm) out
 
-        applyStyle :: String -> [Tag] -> Tree (Selector, CSSAttribute) -> Maybe String -> Maybe String
-        applyStyle depth [] css out = out
-        applyStyle depth (tag : tags) (Node (selector, value) children) out = case selector of
-            StarSelector -> foldr (applyStyle "" (tag:tags)) (value out) children
-            (TagSelector n) -> checkStyleApply n n (_tagName tag) out
-            (HashSelector n) -> checkStyleApply ('#':n) n (fromMaybe "" $ fmap (\ (Attribute (_, v)) -> v) $ getAttr "id") out
-            (ClassSelector n) ->
-                let classes = splitOn " " $ fromMaybe "" $ fmap (\ (Attribute (_, v)) -> v) $ getAttr "style"
-                in foldr (checkStyleApply ('.':n) n) out classes
-            (StateSelector n1 n2) -> out
-            where
-                checkStyleApply prefix check val out = if check == val
-                    then foldr (applyStyle (depth ++ prefix) tags) (value out) children
-                    else out
+getAttr :: Tag -> String -> Maybe Attribute
+getAttr t name = (filter (\ (Attribute (n, _)) -> n == name) (_attrs t)) L.!? 0
+
+applyStyle :: [Tag] -> Tree (Selector, CSSAttribute) -> Maybe String -> Maybe String
+applyStyle [] css out = out
+applyStyle (tag:tags) (Node (selector, value) children) out = case selector of
+    StarSelector -> foldr (applyStyle (tag:tags)) (value out) children
+    (TagSelector n) -> checkStyleApply n (_tagName tag) out
+    (HashSelector n) -> checkStyleApply n (fromMaybe "" $ fmap (\ (Attribute (_, v)) -> v) $ getAttr tag "id") out
+    (ClassSelector n) ->
+        let classes = splitOn " " $ fromMaybe "" $ fmap (\ (Attribute (_, v)) -> v) $ getAttr tag "style"
+        in foldr (checkStyleApply n) out classes
+    (StateSelector n1 n2) -> out
+    where
+        checkStyleApply check val out = if check == val
+            then foldr (applyStyle tags) (value out) children
+            else out
 
 _buildHtml :: BuilderData -> BuilderData
 
@@ -127,7 +97,7 @@ _buildHtml mhm = case _toRead mhm of
         appendHbox mhm = over out (++"\n") $ killText mhm
         killText = set currentText ""
 
-killWhitespace mhm = _killWhitespace $ (if null (_out mhm) || null (_currentText mhm)
+killWhitespace mhm = _killWhitespace $ (if null (_currentText mhm)
     then id
     else over currentText (' ' :)) mhm
 
@@ -139,61 +109,14 @@ _killWhitespace mhm = case next of
     where (next, mhm') = (_toRead mhm !! 0, over toRead (drop 1) mhm)
 
 
-initialState :: [ComponentValue] -> [Token] -> State
-initialState p_css p_emittedTokens  = State {
-    _emittedTokens = p_emittedTokens
-    , _hotkey = ""
-    , _built = _out $ _buildHtml $ builderData p_emittedTokens $ buildCSSTree p_css
-    , _css = p_css
-}
-
-start :: EventM Name State ()
-start = return ()
-
-handler :: BrickEvent Name Message -> EventM Name State ()
-
-handler (VtyEvent (EvKey k m)) = case k of
-    (KChar c) -> do
-        hotkey %= (((if MShift `elem` m then toUpper else id) c):)
-        _hotkey <- use hotkey
-        let (num, exec) = splitNum $ reverse _hotkey
-        when (exec `elem` (keys hotkeys)) (do
-            hotkey .= ""
-            (hotkeys ! exec) $ num)
-    KEsc -> hotkey .= ""
-    _ -> return ()
-    where
-        splitNum :: String -> (Int, String)
-        splitNum str = let (num, exec) = go str in if null num
-            then (0, exec)
-            else (read num - 1, exec)
-            where
-                go [] = ("", "")
-                go (c:cs) = if c `elem` "0123456789"
-                    then let (one, two) = go cs in (c : one, two)
-                    else ("", c:cs)
-
-handler _ = return ()
-
+parseColor :: [ComponentValue] -> (Int, Int, Int)
 parseColor v = case v of
     [(PreservedValue (HashToken (_, n)))] -> 
         let 
             r = read $ "0x" ++ (take 2 n)
             g = read $ "0x" ++ (take 2 $ drop 2 n)
             b = read $ "0x" ++ (drop 4 n)
-        in RGBColor r g b
-    _ -> black
-
-parseDeclarations :: [ComponentValue] -> Attr -> Maybe Attr
-parseDeclarations ds out = case ds of
-    [] -> Just out
-    (nextDeclaration : rest) -> case nextDeclaration of
-        (DeclarationValue (Declaration n v _)) -> case n of
-            "background-color" -> go $ out `withBackColor` (parseColor v)
-            "background" -> go $ out `withBackColor` (parseColor v)
-            "color" -> go $ out `withForeColor` (parseColor v)
-            _ -> go out
-            where go = parseDeclarations rest
+        in (r, g, b)
 
 selectorToString selector = case selector of
     StarSelector -> ""
@@ -202,33 +125,21 @@ selectorToString selector = case selector of
     (TagSelector n) -> n
     (StateSelector n1 n2) -> ""
 
-buildCSS :: State -> AttrMap
-buildCSS state = attrMap defAttr $ _buildCSS (_css state) [
-    (attrName "b", defAttr `withStyle` V.bold `withBackColor` black)
-    , (attrName "tt", defAttr `withStyle` V.italic)
-    ]
-
-_buildCSS :: [ComponentValue] -> [(AttrName, Attr)] -> [(AttrName, Attr)]
-_buildCSS css out = case css of
-    [] -> out
-    (nextValue : rest) -> _buildCSS rest $ case nextValue of
-        (SimpleBlockValue (SimpleCurlyBlock (CurlyBlock ns ds))) -> 
-            let names = map (foldr ((++) . selectorToString) "") ns
-                declrs = parseDeclarations ds defAttr
-            in case declrs of
-                Nothing -> out
-                (Just decs) -> map (\ name -> (attrName name, decs)) names ++ out
-        _ -> out
-
 parseDecleretiens :: [ComponentValue] -> CSSAttribute -> CSSAttribute
 parseDecleretiens ds out = case ds of
     [] -> out
     (nextDeclaration : rest) -> parseDecleretiens rest $ case nextDeclaration of
         (DeclarationValue (Declaration n vs _)) -> case n of
             "position" -> case vs of
-                [(PreservedValue (IdentToken "absolute"))] -> out . (\ _ -> Nothing)
+                [(PreservedValue (IdentToken "absolute"))] -> (\ _ -> Nothing) . out
                 _ -> out . (\ _ -> Nothing)
+            "color" -> setColor vs Mortar.surroundForegroundColor
+            "background" -> setColor vs Mortar.surroundBackgroundColor
             _ -> out
+    where
+        setColor vs func = 
+            let (r, g, b) = parseColor vs
+            in out . (fmap (func r g b))
 
 buildCSSTree :: [ComponentValue] -> Tree (Selector, CSSAttribute)
 buildCSSTree css = unfoldTree _buildCSSTree (blamCSS [] css)
@@ -243,7 +154,7 @@ buildCSSTree css = unfoldTree _buildCSSTree (blamCSS [] css)
                     if not $ null maybeStar
                         then ((StarSelector, snd $ maybeStar !! 0), maybeStarless)
                         else ((StarSelector, []), out)
-            (SimpleBlockValue (SimpleCurlyBlock (CurlyBlock ss ds)) : rest) -> blamCSS (foldr (\ s b -> (s, ds) : b) [] ss ++ out) rest
+            (SimpleBlockValue (SimpleCurlyBlock (CurlyBlock ss ds)) : rest) -> blamCSS (foldr (\ s b -> (reverse s, ds) : b) [] ss ++ out) rest
 
 _buildCSSTree :: (PreSelectorNode, [SelectorNode]) -> ((Selector, CSSAttribute), [(PreSelectorNode, [SelectorNode])])
 _buildCSSTree ((selector, val), css) =
@@ -272,3 +183,7 @@ countCSSTree :: Int -> Tree (Selector, CSSAttribute) -> Int
 countCSSTree out tree = case subForest tree of
     [] -> 1
     _ -> foldr ((+) . (countCSSTree 0)) out (subForest tree)
+
+parseWebpage emittedTokens css = _out $ _buildHtml $ builderData emittedTokens $ buildCSSTree css
+
+drawCSSTree css = drawTree $ fmap (show . fst) $ buildCSSTree css

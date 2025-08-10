@@ -1,8 +1,4 @@
-a, b .ans, #id {
-    color: #F0F0F0;
-    position: absolute;
-}
-
-a b {
-    color: #000000;
+div {
+    color: #00FF00;
+    background: #FF00FF;
 }
