@@ -7,6 +7,7 @@ import System.IO
 
 import qualified Data.Map as Map
 import Data.List.Split
+import qualified Data.List as List
 import Data.Char
 import Data.Maybe
 import Control.Monad
@@ -65,8 +66,19 @@ strikethrough = putEscapeSequence "9m"
 
 resetAttrs = putEscapeSequence "0m"
 
-minit lines num addendum = if length lines < num
-    then minit (lines ++ addendum) num addendum
+removeEscapes str =
+    let 
+        index = List.elemIndex '\x1b' str
+        (before, rest) = splitAt (fromJust index) str
+        (_, (_:after)) = splitAt (fromJust $ List.elemIndex 'm' rest) rest
+    in case index of
+        Nothing -> str
+        (Just _) -> removeEscapes $ before ++ after
+
+escapeLength = length . removeEscapes
+
+minit lines num addendum length = if length lines < num
+    then minit (lines ++ addendum) num addendum length
     else lines
 
 getKey = reverse <$> _getKey ""
@@ -102,7 +114,7 @@ handleInput state = case inputMap Map.!? _inputList state' of
         state' = over inputList checkInputList state
 
 wrapWords :: Int -> String -> [String] -> [String]
-wrapWords width str out = if length str > width
+wrapWords width str out = if escapeLength str > width
     then
         let (tail, rest) = splitAt width str
             (addendum, str1) = splitLastSpace "" $ reverse tail
@@ -140,7 +152,7 @@ slice begin end = take (end - begin) . drop begin
 drawApp state = do
     let w = _window state
 
-    let minned = map (\ a -> minit a (width w) " ") $ minit (_strs state) (height w) [""]
+    let minned = map (\ a -> minit a (width w) " " escapeLength) $ minit (_strs state) (height w) [""] length
     let cut = take (height w) . drop (_line state) $ minned
 
     resetCursor

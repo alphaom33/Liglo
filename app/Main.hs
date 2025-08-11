@@ -61,4 +61,3 @@ main = do
     let outest = H.parseWebpage (_emitted result) outer
 
     Mortar.appIt outest Mortar.initialState
-
