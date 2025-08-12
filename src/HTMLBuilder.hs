@@ -36,15 +36,13 @@ data BuilderData = BuilderData {
     , _out :: String
     , _currentText :: String
     , _style :: Tree (Selector, CSSAttribute)
+    , _lined :: Bool
 }
 $(makeLenses ''BuilderData)
-builderData emittedTokens style = BuilderData {_openTags=[], _toRead=emittedTokens, _out="", _currentText="", _style=style}
+builderData emittedTokens style = BuilderData {_openTags=[], _toRead=emittedTokens, _out="", _currentText="", _style=style, _lined=True}
 
-makeWidget :: Tag -> BuilderData -> Maybe String
-makeWidget t mhm = _makeWidget t mhm $ Just $ reverse $ _currentText mhm
-
-_makeWidget :: Tag -> BuilderData -> Maybe String -> Maybe String
-_makeWidget t mhm out = applyStyle (_openTags mhm) (_style mhm) out
+makeWidget :: BuilderData -> Maybe String
+makeWidget mhm = applyStyle (_openTags mhm) (_style mhm) $ Just $ reverse $ _currentText mhm
 
 getAttr :: Tag -> String -> Maybe Attribute
 getAttr t name = (filter (\ (Attribute (n, _)) -> n == name) (_attrs t)) L.!? 0
@@ -67,39 +65,40 @@ applyStyle (tag:tags) (Node (selector, value) children) out = case selector of
 _buildHtml :: BuilderData -> BuilderData
 
 _buildHtml mhm = case _toRead mhm of
-    (TagToken t:emittedTokens) -> _buildHtml $ (if
+    (TagToken t:emittedTokens) -> _buildHtml $ (if -- ...what
         | _selfClosing t -> if _tagName t == "br"
             then appendHbox mhm'
             else mhm'
-        | _opening t -> over openTags (t :) $ if not (null $ _currentText mhm)
+        | _opening t -> over openTags (t:) $ if not (null $ _currentText mhm)
             then (endings t mhm')
             else mhm'
         | not $ _opening t -> over openTags (drop 1) $ endings (_openTags mhm' !! 0) mhm'
         | otherwise -> mhm')
         where
-            appendWidget t mhm = case makeWidget t mhm of
+            appendWidget mhm = case makeWidget mhm of
                 Nothing -> mhm
                 (Just w) -> over out (++w) $ killText mhm
             endings t mhm = if _tagName t `elem` ["li", "h1", "h2", "h3", "h4", "h5", "h6", "p", "pre", "div"]
-                then appendHbox $ appendWidget t mhm
-                else appendWidget t mhm
+                then appendHbox $ appendWidget mhm
+                else appendWidget mhm
 
     (Character c:emittedTokens) -> _buildHtml $ (if c `elem` " \n\t" && fmap _tagName (_openTags mhm' L.!? 0) /= Just "pre"
         then killWhitespace
         else if not (null (_openTags mhm)) && null (["head", "meta", "link", "script", "style", "select"] `L.intersect` map _tagName (_openTags mhm))
-            then over currentText (c:)
+            then (over currentText (c:)) . (set lined False)
             else id) mhm'
     (e:emittedTokens) -> _buildHtml mhm'
     [] -> appendHbox mhm
+
     where 
         (next, mhm') = (_toRead mhm !! 0, over toRead (drop 1) mhm)
 
-        appendHbox mhm = over out (++"\n") $ killText mhm
+        appendHbox mhm = set lined True $ over out (++"\n") $ killText mhm
         killText = set currentText ""
 
-killWhitespace mhm = _killWhitespace $ (if null (_currentText mhm)
-    then id
-    else over currentText (' ' :)) mhm
+killWhitespace mhm = _killWhitespace $ (if not $ _lined mhm
+    then over currentText (' ' :)
+    else id) mhm
 
 _killWhitespace mhm = case next of
     (Character c) -> if c `elem` " \n\t"
@@ -110,13 +109,16 @@ _killWhitespace mhm = case next of
 
 
 parseColor :: [ComponentValue] -> (Int, Int, Int)
-parseColor v = case v of
+parseColor v = case tracer v of
     [(PreservedValue (HashToken (_, n)))] -> 
         let 
             r = read $ "0x" ++ (take 2 n)
             g = read $ "0x" ++ (take 2 $ drop 2 n)
             b = read $ "0x" ++ (drop 4 n)
         in (r, g, b)
+    [(PreservedValue (IdentToken n))] -> case n of
+        "white" -> (255, 255, 255)
+        "black" -> (0, 0, 0)
 
 selectorToString selector = case selector of
     StarSelector -> ""
@@ -132,9 +134,13 @@ parseDecleretiens ds out = case ds of
         (DeclarationValue (Declaration n vs _)) -> case n of
             "position" -> case vs of
                 [(PreservedValue (IdentToken "absolute"))] -> (\ _ -> Nothing) . out
-                _ -> out . (\ _ -> Nothing)
+                _ -> (\ _ -> Nothing) . out
             "color" -> setColor vs Mortar.surroundForegroundColor
             "background" -> setColor vs Mortar.surroundBackgroundColor
+            "font-weight" -> case vs of
+                [(PreservedValue (IdentToken "bold"))] -> fmap Mortar.surroundBold
+            "font-style" -> case vs of
+                [(PreservedValue (IdentToken "italic"))] -> fmap Mortar.surroundItalic
             _ -> out
     where
         setColor vs func = 

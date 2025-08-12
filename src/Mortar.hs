@@ -57,14 +57,18 @@ setBackgroundColor r g b = getEscapeSequence $ "48;2;" ++ show r ++ ";" ++ show 
 surroundForegroundColor r g b s = setForegroundColor r g b ++ s ++ setForegroundColor 255 255 255
 surroundBackgroundColor r g b s = setBackgroundColor r g b ++ s ++ resetBackground
 
+surroundBold s = bold ++ s ++ getResetAttrs
+surroundItalic s = italic ++ s ++ getResetAttrs
+
 resetBackground = getEscapeSequence "49m"
 
-bold = putEscapeSequence "1m"
-italic = putEscapeSequence "3m"
-underline = putEscapeSequence "4m"
-strikethrough = putEscapeSequence "9m"
+bold = getEscapeSequence "1m"
+italic = getEscapeSequence "3m"
+underline = getEscapeSequence "4m"
+strikethrough = getEscapeSequence "9m"
 
 resetAttrs = putEscapeSequence "0m"
+getResetAttrs = getEscapeSequence "0m"
 
 removeEscapes str =
     let 
@@ -77,9 +81,11 @@ removeEscapes str =
 
 escapeLength = length . removeEscapes
 
-minit lines num addendum length = if length lines < num
-    then minit (lines ++ addendum) num addendum length
-    else lines
+minit lines num addendum length = _minit lines (length lines) 
+    where 
+        _minit lines lineLength = if lineLength < num
+            then _minit (lines ++ addendum) (lineLength + 1)
+            else lines
 
 getKey = reverse <$> _getKey ""
     where
