@@ -41,16 +41,16 @@ data BuilderData = BuilderData {
 $(makeLenses ''BuilderData)
 builderData emittedTokens style = BuilderData {_openTags=[], _toRead=emittedTokens, _out="", _currentText="", _style=style, _lined=True}
 
-makeWidget :: BuilderData -> Maybe String
-makeWidget mhm = applyStyle (_openTags mhm) (_style mhm) $ Just $ reverse $ _currentText mhm
+makeWidget :: BuilderData -> CSSAttribute
+makeWidget mhm = applyStyle (_openTags mhm) (_style mhm) id
 
 getAttr :: Tag -> String -> Maybe Attribute
 getAttr t name = (filter (\ (Attribute (n, _)) -> n == name) (_attrs t)) L.!? 0
 
-applyStyle :: [Tag] -> Tree (Selector, CSSAttribute) -> Maybe String -> Maybe String
+applyStyle :: [Tag] -> Tree (Selector, CSSAttribute) -> CSSAttribute -> CSSAttribute
 applyStyle [] css out = out
 applyStyle (tag:tags) (Node (selector, value) children) out = case selector of
-    StarSelector -> foldr (applyStyle (tag:tags)) (value out) children
+    StarSelector -> foldr (applyStyle (tag:tags)) (value . out) children
     (TagSelector n) -> checkStyleApply n (_tagName tag) out
     (HashSelector n) -> checkStyleApply n (fromMaybe "" $ fmap (\ (Attribute (_, v)) -> v) $ getAttr tag "id") out
     (ClassSelector n) ->
@@ -59,7 +59,7 @@ applyStyle (tag:tags) (Node (selector, value) children) out = case selector of
     (StateSelector n1 n2) -> out
     where
         checkStyleApply check val out = if check == val
-            then foldr (applyStyle tags) (value out) children
+            then foldr (applyStyle tags) (value . out) children
             else out
 
 _buildHtml :: BuilderData -> BuilderData
@@ -69,13 +69,19 @@ _buildHtml mhm = case _toRead mhm of
         | _selfClosing t -> if _tagName t == "br"
             then appendHbox mhm'
             else mhm'
-        | _opening t -> over openTags (t:) $ if not (null $ _currentText mhm)
-            then (endings t mhm')
-            else mhm'
-        | not $ _opening t -> over openTags (drop 1) $ endings (_openTags mhm' !! 0) mhm'
+        | _opening t -> 
+            over openTags (t:) 
+            . (if not (null $ _currentText mhm)
+                then endings t
+                else id)
+            $ mhm'
+        | not $ _opening t -> 
+            over openTags (drop 1) 
+            . endings (_openTags mhm' !! 0)
+            $ mhm'
         | otherwise -> mhm')
         where
-            appendWidget mhm = case makeWidget mhm of
+            appendWidget mhm = case makeWidget mhm $ Just $ reverse $ _currentText mhm of
                 Nothing -> mhm
                 (Just w) -> over out (++w) $ killText mhm
             endings t mhm = if _tagName t `elem` ["li", "h1", "h2", "h3", "h4", "h5", "h6", "p", "pre", "div"]
@@ -109,7 +115,7 @@ _killWhitespace mhm = case next of
 
 
 parseColor :: [ComponentValue] -> (Int, Int, Int)
-parseColor v = case tracer v of
+parseColor v = case v of
     [(PreservedValue (HashToken (_, n)))] -> 
         let 
             r = read $ "0x" ++ (take 2 n)
