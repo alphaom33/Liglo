@@ -8,10 +8,8 @@ import System.IO
 import qualified Data.Map as Map
 import Data.List.Split
 import qualified Data.List as List
-import Data.Char
 import Data.Maybe
 import Control.Monad
-import Control.Monad.IO.Class
 
 import Debug.Trace
 
@@ -20,6 +18,7 @@ import System.Console.Terminal.Size
 import Lens.Micro.TH (makeLenses)
 import Lens.Micro (set, over)
 
+tracer :: Show a => a -> a
 tracer str = trace (show str) str
 
 data State = State {
@@ -31,6 +30,7 @@ data State = State {
 } deriving (Show, Eq)
 $(makeLenses ''State)
 
+initialState :: State
 initialState = State {
     _line = 0
     , _strs = []
@@ -39,55 +39,84 @@ initialState = State {
     , _inputList = ""
 }
 
+getEscapeSequence :: [Char] -> [Char]
 getEscapeSequence str = '\x1b' : '[' : str
+putEscapeSequence :: [Char] -> IO ()
 putEscapeSequence str = putStr $ '\x1b' : '[' : str
 
+hideCursor :: IO ()
 hideCursor = putEscapeSequence "?25l"
+showCursor :: IO ()
 showCursor = putEscapeSequence "?25h"
 
+resetCursor :: IO ()
 resetCursor = putEscapeSequence "H"
 
+clearScreen :: IO ()
 clearScreen = do
     putEscapeSequence "2J"
     resetCursor
 
+setForegroundColor :: (Show a1, Show a2, Show a3) => a1 -> a2 -> a3 -> [Char]
 setForegroundColor r g b = getEscapeSequence $ "38;2;" ++ show r ++ ";" ++ show g ++ ";" ++ show b ++ "m"
+setBackgroundColor :: (Show a1, Show a2, Show a3) => a1 -> a2 -> a3 -> [Char]
 setBackgroundColor r g b = getEscapeSequence $ "48;2;" ++ show r ++ ";" ++ show g ++ ";" ++ show b ++ "m"
 
+surroundForegroundColor :: (Show a1, Show a2, Show a3) => a1 -> a2 -> a3 -> [Char] -> [Char]
 surroundForegroundColor r g b s = setForegroundColor r g b ++ s ++ resetForeground
+surroundBackgroundColor :: (Show a1, Show a2, Show a3) => a1 -> a2 -> a3 -> [Char] -> [Char]
 surroundBackgroundColor r g b s = setBackgroundColor r g b ++ s ++ resetBackground
 
-surroundBold s = bold ++ s ++ getResetAttrs
-surroundItalic s = italic ++ s ++ getResetAttrs
+surroundBold :: [Char] -> [Char]
+surroundBold s = bold ++ s ++ resetBold
+surroundItalic :: [Char] -> [Char]
+surroundItalic s = italic ++ s ++ resetItalic
 
+resetForeground :: [Char]
 resetForeground = getEscapeSequence "39m"
+resetBackground :: [Char]
 resetBackground = getEscapeSequence "49m"
 
+bold :: [Char]
 bold = getEscapeSequence "1m"
+italic :: [Char]
 italic = getEscapeSequence "3m"
+underline :: [Char]
 underline = getEscapeSequence "4m"
+strikethrough :: [Char]
 strikethrough = getEscapeSequence "9m"
 
+resetBold :: [Char]
+resetBold = getEscapeSequence "22m"
+resetItalic :: [Char]
+resetItalic = getEscapeSequence "23m"
+
+resetAttrs :: IO ()
 resetAttrs = putEscapeSequence "0m"
+getResetAttrs :: [Char]
 getResetAttrs = getEscapeSequence "0m"
 
+removeEscapes :: [Char] -> [Char]
 removeEscapes str =
     let 
         index = List.elemIndex '\x1b' str
         (before, rest) = splitAt (fromJust index) str
-        (_, (_:after)) = splitAt (fromJust $ List.elemIndex 'm' rest) rest
+        (_, _:after) = splitAt (fromJust $ List.elemIndex 'm' rest) rest
     in case index of
         Nothing -> str
         (Just _) -> removeEscapes $ before ++ after
 
+escapeLength :: [Char] -> Int
 escapeLength = length . removeEscapes
 
+minit :: (Ord p, Num p) => [a] -> p -> [a] -> ([a] -> p) -> [a]
 minit lines num addendum length = _minit lines (length lines) 
     where 
         _minit lines lineLength = if lineLength < num
             then _minit (lines ++ addendum) (lineLength + 1)
             else lines
 
+getKey :: IO [Char]
 getKey = reverse <$> _getKey ""
     where
         _getKey chars = do
@@ -95,22 +124,25 @@ getKey = reverse <$> _getKey ""
             more <- hReady stdin
             (if more then _getKey else return) $ char : chars
 
-clamp min max num = if num > max
-    then max
-    else if num < min
-        then min
-        else num
+clamp :: Ord a => a -> a -> a -> a
+clamp min max num 
+    | num > max = max
+    | num < min = min
+    | otherwise = num
 
-clampScreen state = set line (clamp 0 ((length $ _strs state) - (height $ _window state) - 1) (_line state)) state
+clampScreen :: State -> State
+clampScreen state = set line (clamp 0 (length (_strs state) - height (_window state) - 1) (_line state)) state
 
+inputMap :: Map.Map [Char] (State -> State)
 inputMap = Map.fromList [
         ("q", set shouldQuit True)
         , ("j", clampScreen . over line (+1))
-        , ("k", clampScreen . over line (pred))
+        , ("k", clampScreen . over line pred)
         , ("gg", set line 0)
         , ("G", clampScreen . set line maxBound)
     ]
 
+handleInput :: State -> State
 handleInput state = case inputMap Map.!? _inputList state' of
     Nothing -> state'
     (Just e) -> set inputList "" $ e state'
@@ -128,11 +160,13 @@ wrapWords width str out = if escapeLength str > width
         in str1 : wrapWords width (addendum ++ rest) out
     else str : out
 
+splitLastSpace :: [Char] -> [Char] -> ([Char], [Char])
 splitLastSpace stored [] = (stored, "")
 splitLastSpace stored (c:cs) = if c == ' '
     then (stored, reverse cs)
     else splitLastSpace (c:stored) cs
 
+appIt :: [Char] -> State -> IO ()
 appIt str state = do
     hSetBuffering stdin NoBuffering
     hSetEcho stdin False
@@ -154,8 +188,10 @@ appIt str state = do
     showCursor
     clearScreen
 
+slice :: Int -> Int -> [a] -> [a]
 slice begin end = take (end - begin) . drop begin
 
+drawApp :: State -> IO ()
 drawApp state = do
     let w = _window state
 
@@ -163,7 +199,7 @@ drawApp state = do
     let cut = take (height w) . drop (_line state) $ minned
 
     resetCursor
-    putStr $ foldr (++) "" cut
+    putStr $ concat cut
     hFlush stdout
 
 runApp :: State -> IO ()
@@ -176,5 +212,5 @@ runApp state = do
 
     drawApp state'
 
-    when (not $ _shouldQuit state') $ runApp state'
+    unless (_shouldQuit state') $ runApp state'
 

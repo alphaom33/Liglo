@@ -1,9 +1,4 @@
-{-# LANGUAGE TemplateHaskell #-}
-
 module CSSParser where
-
-import Lens.Micro.TH (makeLenses)
-import Lens.Micro (set, over)
 
 import CSSTokenizer
 import HTMLParser (tracer)
@@ -19,8 +14,8 @@ data Selector =
     deriving (Show, Eq)
 
 data CurlyBlock = CurlyBlock [[Selector]] [ComponentValue] deriving (Show, Eq)
-data SquareBlock = SquareBlock [ComponentValue] deriving (Show, Eq)
-data ParenthesisBlock = ParenthesisBlock [ComponentValue] deriving (Show, Eq)
+newtype SquareBlock = SquareBlock [ComponentValue] deriving (Show, Eq)
+newtype ParenthesisBlock = ParenthesisBlock [ComponentValue] deriving (Show, Eq)
 
 data SimpleBlock =
     SimpleCurlyBlock CurlyBlock
@@ -56,8 +51,10 @@ data Rule =
     | DeclarationRule Declaration
     deriving (Show, Eq)
 
+parseList :: [CSSToken] -> [ComponentValue]
 parseList list = reverse $ _parseList [] list
 
+consumeFunction :: [CSSToken] -> (ComponentValue, [CSSToken])
 consumeFunction s = go [] state
     where
         go :: [ComponentValue] -> [CSSToken] -> (ComponentValue, [CSSToken])
@@ -66,6 +63,7 @@ consumeFunction s = go [] state
             else let (val, state'') = consumeComponentValue state in go (val:out) state''
             where
                 (nextInputToken:state') = state
+
         ((FunctionToken name):state) = s
 
 consumeComponentValue :: [CSSToken] -> (ComponentValue, [CSSToken])
@@ -109,7 +107,7 @@ consumeSimpleBlock tokens s =
                 else addCurrentList
             ((PreservedValue (DelimToken '*')) : rest) -> parseTokenList out (StarSelector : currentList) rest
             ((PreservedValue locator) : (PreservedValue ColonToken) : (PreservedValue pseudoClass) : rest) -> 
-                parseTokenList out ((StateSelector (grabStr locator) (grabStr pseudoClass)) : currentList) rest
+                parseTokenList out (StateSelector (grabStr locator) (grabStr pseudoClass) : currentList) rest
                 where 
                     grabStr token = case token of
                         (IdentToken s) -> s
@@ -124,7 +122,7 @@ consumeSimpleBlock tokens s =
                 addCurrentList = reverse currentList : out
 
         startToConstructor = fromList [
-            (OpeningCurlyBracketToken, SimpleCurlyBlock . (CurlyBlock $ parseTokenList [] [] tokens))
+            (OpeningCurlyBracketToken, SimpleCurlyBlock . CurlyBlock (parseTokenList [] [] tokens))
             , (OpeningSquareBracketToken, SimpleSquareBlock . SquareBlock)
             , (OpeningParenthesisToken, SimpleParenthesisBlock . ParenthesisBlock)
             ]
@@ -138,7 +136,7 @@ consumeQualifiedRule state = go [] state
         go prelude state = case nextInputToken of
             EOFToken -> (Nothing, state)
             OpeningCurlyBracketToken -> 
-                let ((SimpleBlockValue (SimpleCurlyBlock val)), state'') = consumeSimpleBlock [] state
+                let (SimpleBlockValue (SimpleCurlyBlock val), state'') = consumeSimpleBlock [] state
                 in (Just QualifiedRule {qualifiedPrelude=prelude, qualifiedBlock=val}, state'')
             _ -> let (val, state'') = consumeComponentValue state in go (val:prelude) state''
             where
@@ -151,7 +149,7 @@ consumeAtRule s = go [] state
         go prelude state = case nextInputToken of
             SemicolonToken -> (attish Nothing, state')
             EOFToken -> (attish Nothing, state)
-            OpeningCurlyBracketToken -> let ((SimpleBlockValue (SimpleCurlyBlock val)), state'') = consumeSimpleBlock [] state in (attish (Just val), state'')
+            OpeningCurlyBracketToken -> let (SimpleBlockValue (SimpleCurlyBlock val), state'') = consumeSimpleBlock [] state in (attish (Just val), state'')
             _ -> let (val, state'') = consumeComponentValue state in go (val:prelude) state''
             where
                 attish block = AtRule {atName=name, atPrelude=prelude, atBlock=block}
@@ -261,7 +259,7 @@ _parseList :: [ComponentValue] -> [CSSToken] -> [ComponentValue]
 _parseList out state = if nextInputToken == EOFToken
     then out
     else let (val, state') = consumeComponentValue state in _parseList (val:out) state'
-    where nextInputToken = state!!0
+    where nextInputToken = head state
 
 outList :: String -> String -> [ComponentValue] -> String
 outList out _ [] = out

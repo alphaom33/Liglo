@@ -1,27 +1,18 @@
+{-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE MultiWayIf #-}
+{-# OPTIONS_GHC -Wno-incomplete-patterns #-}
 
 module HTMLBuilder where
 
-import Debug.Trace
 import qualified Data.List as L
 import Data.List.Split
-import Data.Char
-import Data.Map (fromList, (!), (!?), keys, Map(..))
-import Control.Monad (when)
 import Data.Tree
-import Data.Maybe
 
-import Text.Wrap
-
-import Lens.Micro.Mtl ((.=), (%=), use, view)
 import Lens.Micro.TH (makeLenses)
 import Lens.Micro (set, over)
 
-import CharacterReferences
 import HTMLParser (Token(..), Tag, Attribute(..), _selfClosing, _opening, _tagName, tracer, _attrs)
-import SearchApp (Name(..))
-import Message
 import CSSParser
 import CSSTokenizer
 import qualified Mortar
@@ -39,33 +30,35 @@ data BuilderData = BuilderData {
     , _lined :: Bool
 }
 $(makeLenses ''BuilderData)
-builderData emittedTokens style = BuilderData {_openTags=[], _toRead=emittedTokens, _out=[], _currentText="", _style=style, _lined=True}
+
+builderData :: [Token] -> Tree (Selector, CSSAttribute) -> BuilderData
+builderData emittedTokens p_style = BuilderData {_openTags=[], _toRead=emittedTokens, _out=[], _currentText="", _style=p_style, _lined=True}
 
 makeWidget :: BuilderData -> CSSAttribute
 makeWidget mhm = applyStyle (_openTags mhm) (_style mhm) id
 
 getAttr :: Tag -> String -> Maybe Attribute
-getAttr t name = (filter (\ (Attribute (n, _)) -> n == name) (_attrs t)) L.!? 0
+getAttr t name = filter (\ (Attribute (n, _)) -> n == name) (_attrs t) L.!? 0
 
 applyStyle :: [Tag] -> Tree (Selector, CSSAttribute) -> CSSAttribute -> CSSAttribute
-applyStyle [] css out = out
-applyStyle (tag:tags) (Node (selector, value) children) out = case selector of
-    StarSelector -> foldr (applyStyle (tag:tags)) (value . out) children
-    (TagSelector n) -> checkStyleApply n (_tagName tag) out
-    (HashSelector n) -> checkStyleApply n (fromMaybe "" $ fmap (\ (Attribute (_, v)) -> v) $ getAttr tag "id") out
+applyStyle [] _ attribute = attribute
+applyStyle (tag:tags) (Node (selector, value) children) attribute = case selector of
+    StarSelector -> foldr (applyStyle (tag:tags)) (value . attribute) children
+    (TagSelector n) -> checkStyleApply n (_tagName tag) attribute
+    (HashSelector n) -> checkStyleApply n (maybe "" (\ (Attribute (_, v)) -> v) $ getAttr tag "id") attribute
     (ClassSelector n) ->
-        let classes = splitOn " " $ fromMaybe "" $ fmap (\ (Attribute (_, v)) -> v) $ getAttr tag "style"
-        in foldr (checkStyleApply n) out classes
-    (StateSelector n1 n2) -> out
+        let classes = splitOn " " $ maybe "" (\ (Attribute (_, v)) -> v) $ getAttr tag "style"
+        in foldr (checkStyleApply n) attribute classes
+    (StateSelector _ _) -> attribute
     where
-        checkStyleApply check val out = if check == val
-            then foldr (applyStyle tags) (value . out) children
-            else out
+        checkStyleApply check val currentAttribute = if check == val
+            then foldr (applyStyle tags) (value . currentAttribute) children
+            else attribute
 
 _buildHtml :: BuilderData -> BuilderData
 
 _buildHtml mhm = case _toRead mhm of
-    (TagToken t:emittedTokens) -> _buildHtml $ (if -- ...what
+    (TagToken t:_) -> _buildHtml (if -- ...what
         | _selfClosing t -> if _tagName t == "br"
             then appendHbox mhm'
             else mhm'
@@ -78,70 +71,73 @@ _buildHtml mhm = case _toRead mhm of
             $ mhm'
         | not $ _opening t -> 
             over openTags (drop 1) 
-            . endings (_openTags mhm' !! 0)
+            . endings (head $ _openTags mhm')
             . killText
             . putText (reverse $ _currentText mhm')
             $ mhm'
         | otherwise -> mhm')
         where
-            appendWidget mhm = case makeWidget mhm $ Just $ (_out mhm !! 0) of
-                Nothing -> mhm'
-                (Just w) -> putText w $ killText mhm'
-                where mhm' = over out (drop 1) mhm
-            endings t mhm = if _tagName t `elem` ["li", "h1", "h2", "h3", "h4", "h5", "h6", "p", "pre", "div"]
-                then appendHbox $ appendWidget mhm
-                else appendWidget mhm
+            appendWidget state = case makeWidget state $ Just $ head $ _out state of
+                Nothing -> state'
+                (Just w) -> putText w $ killText state'
+                where state' = over out (drop 1) state
 
-    (Character c:emittedTokens) -> _buildHtml $ (if c `elem` " \n\t" && fmap _tagName (_openTags mhm' L.!? 0) /= Just "pre"
+            endings tag state = if _tagName tag `elem` ["li", "h1", "h2", "h3", "h4", "h5", "h6", "p", "pre", "div"]
+                then appendWidget $ appendHbox state
+                else appendWidget state
+
+    (Character c:_) -> _buildHtml $ (if c `elem` " \n\t" && fmap _tagName (_openTags mhm' L.!? 0) /= Just "pre"
         then killWhitespace
         else if not (null (_openTags mhm)) && null (["head", "meta", "link", "script", "style", "select"] `L.intersect` map _tagName (_openTags mhm))
-            then (over currentText (c:)) . (set lined False)
+            then over currentText (c:) . set lined False
             else id) mhm'
 
-    (e:emittedTokens) -> _buildHtml mhm'
+    (_:_) -> _buildHtml mhm'
 
     [] -> appendHbox mhm
-
     where 
-        (next, mhm') = (_toRead mhm !! 0, over toRead (drop 1) mhm)
+        mhm' = over toRead (drop 1) mhm
 
-        putText text = over out (\ out -> case out of
+        putText text = over out (\case
             [] -> [text]
             (current:rest) -> (current ++ text) : rest)
 
-        appendHbox mhm = set lined True $ putText "\n" $ killText mhm
+        appendHbox = set lined True . putText "\n" . killText
         killText = set currentText ""
 
+killWhitespace :: BuilderData -> BuilderData
 killWhitespace mhm = _killWhitespace $ (if not $ _lined mhm
     then over currentText (' ' :)
     else id) mhm
 
+_killWhitespace :: BuilderData -> BuilderData
 _killWhitespace mhm = case next of
     (Character c) -> if c `elem` " \n\t"
         then killWhitespace mhm'
         else mhm
     _ -> mhm
-    where (next, mhm') = (_toRead mhm !! 0, over toRead (drop 1) mhm)
+    where (next, mhm') = (head $ _toRead mhm, over toRead (drop 1) mhm)
 
 
 parseColor :: [ComponentValue] -> (Int, Int, Int)
 parseColor v = case v of
-    [(PreservedValue (HashToken (_, n)))] -> 
+    [PreservedValue (HashToken (_, n))] -> 
         let 
-            r = read $ "0x" ++ (take 2 n)
-            g = read $ "0x" ++ (take 2 $ drop 2 n)
-            b = read $ "0x" ++ (drop 4 n)
+            r = read $ "0x" ++ take 2 n
+            g = read $ "0x" ++ take 2 (drop 2 n)
+            b = read $ "0x" ++ drop 4 n
         in (r, g, b)
-    [(PreservedValue (IdentToken n))] -> case n of
+    [PreservedValue (IdentToken n)] -> case n of
         "white" -> (255, 255, 255)
         "black" -> (0, 0, 0)
 
+selectorToString :: Selector -> String
 selectorToString selector = case selector of
     StarSelector -> ""
     (HashSelector n) -> '#' : n
     (ClassSelector n) -> '.' : n
     (TagSelector n) -> n
-    (StateSelector n1 n2) -> ""
+    (StateSelector _ _) -> ""
 
 parseDecleretiens :: [ComponentValue] -> CSSAttribute -> CSSAttribute
 parseDecleretiens ds out = case ds of
@@ -149,44 +145,45 @@ parseDecleretiens ds out = case ds of
     (nextDeclaration : rest) -> parseDecleretiens rest $ case nextDeclaration of
         (DeclarationValue (Declaration n vs _)) -> case n of
             "position" -> case vs of
-                [(PreservedValue (IdentToken "absolute"))] -> (\ _ -> Nothing) . out
+                [PreservedValue (IdentToken "absolute")] -> const Nothing . out
                 _ -> out
             "color" -> setColor vs Mortar.surroundForegroundColor
             "background" -> setColor vs Mortar.surroundBackgroundColor
             "font-weight" -> case vs of
-                [(PreservedValue (IdentToken "bold"))] -> fmap Mortar.surroundBold
+                [PreservedValue (IdentToken "bold")] -> fmap Mortar.surroundBold
             "font-style" -> case vs of
-                [(PreservedValue (IdentToken "italic"))] -> fmap Mortar.surroundItalic
+                [PreservedValue (IdentToken "italic")] -> fmap Mortar.surroundItalic
+                [PreservedValue (IdentToken "normal")] -> fmap (Mortar.resetItalic++)
             _ -> out
     where
         setColor vs func = 
             let (r, g, b) = parseColor vs
-            in out . (fmap (func r g b))
+            in out . fmap (func r g b)
 
 buildCSSTree :: [ComponentValue] -> Tree (Selector, CSSAttribute)
 buildCSSTree css = unfoldTree _buildCSSTree (blamCSS [] css)
-    where
-        blamCSS :: [SelectorNode] -> [ComponentValue] -> (PreSelectorNode, [SelectorNode])
-        blamCSS out css = case css of
-            [] -> 
-                let 
-                    maybeStar = filter ((== [StarSelector]) . fst) out
-                    maybeStarless = filter ((/= [StarSelector]) . fst) out
-                in 
-                    if not $ null maybeStar
-                        then ((StarSelector, snd $ maybeStar !! 0), maybeStarless)
-                        else ((StarSelector, []), out)
-            (SimpleBlockValue (SimpleCurlyBlock (CurlyBlock ss ds)) : rest) -> blamCSS (foldr (\ s b -> (reverse s, ds) : b) [] ss ++ out) rest
+
+blamCSS :: [SelectorNode] -> [ComponentValue] -> (PreSelectorNode, [SelectorNode])
+blamCSS collapsed css = case css of
+    [] -> 
+        let 
+            maybeStar = filter ((== [StarSelector]) . fst) collapsed
+            maybeStarless = filter ((/= [StarSelector]) . fst) collapsed
+        in 
+            if not $ null maybeStar
+                then ((StarSelector, snd $ head maybeStar), maybeStarless)
+                else ((StarSelector, []), collapsed)
+    (SimpleBlockValue (SimpleCurlyBlock (CurlyBlock ss ds)) : rest) -> blamCSS (map (\ s -> (reverse s, ds)) ss ++ collapsed) rest
 
 _buildCSSTree :: (PreSelectorNode, [SelectorNode]) -> ((Selector, CSSAttribute), [(PreSelectorNode, [SelectorNode])])
 _buildCSSTree ((selector, val), css) =
     let 
         selectish :: SelectorNode -> [(PreSelectorNode, [SelectorNode])] -> [(PreSelectorNode, [SelectorNode])]
-        selectish (selector : rest, vals) out =
+        selectish (currentSelector : rest, vals) children =
             let
-                filtered = filter ((== selector) . fst . fst) out
-                ((_, add), left) = filtered !! 0
-                unfiltered = filter ((/= selector) . fst . fst) out
+                filtered = filter ((== currentSelector) . fst . fst) children
+                ((_, add), left) = head filtered
+                unfiltered = filter ((/= currentSelector) . fst . fst) children
                 vals' = if null rest then vals else []
 
                 addendum remainder = if null rest
@@ -194,19 +191,20 @@ _buildCSSTree ((selector, val), css) =
                     else (rest, vals) : remainder
             in 
                 if not $ null filtered
-                    then ((selector, add ++ vals'), addendum left) : unfiltered
-                    else ((selector, vals'), addendum []) : out
+                    then ((currentSelector, add ++ vals'), addendum left) : unfiltered
+                    else ((currentSelector, vals'), addendum []) : children
 
         sorted :: [(PreSelectorNode, [SelectorNode])]
         sorted = foldr selectish [] css
     in ((selector, parseDecleretiens val id), sorted)
 
 countCSSTree :: Int -> Tree (Selector, CSSAttribute) -> Int
-countCSSTree out tree = case subForest tree of
+countCSSTree num tree = case subForest tree of
     [] -> 1
-    _ -> foldr ((+) . (countCSSTree 0)) out (subForest tree)
+    _ -> foldr ((+) . countCSSTree 0) num (subForest tree)
 
 parseWebpage :: [Token] -> [ComponentValue] -> String
-parseWebpage emittedTokens css = (!! 0) $ _out $ _buildHtml $ builderData emittedTokens $ buildCSSTree css
+parseWebpage emittedTokens css = head $ _out $ _buildHtml $ builderData emittedTokens $ buildCSSTree css
 
-drawCSSTree css = drawTree $ fmap (show . fst) $ buildCSSTree css
+drawCSSTree :: [ComponentValue] -> String
+drawCSSTree css = drawTree $ show . fst <$> buildCSSTree css

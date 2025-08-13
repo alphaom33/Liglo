@@ -1,7 +1,6 @@
 {-# LANGUAGE OverloadedStrings #-}
 module Main where
 
-import qualified Webpage
 import qualified SearchApp
 import qualified HTMLParser
 
@@ -42,9 +41,9 @@ main = do
     -- let arged = map (\ c -> if c == ' ' then '+' else c) $ concat args
     -- key <- lookupEnv "GOOGLE_API_KEY"
     -- let apiKey = fromJust key
-    -- finalState <- defaultMain S.app $ S.initialState apiKey (args!!0)
+    -- finalState <- defaultMain S.app $ S.initialState apiKey $ head args
 
-    -- when (S._curQuery finalState == args!!0) (do
+    -- when (S._curQuery finalState == head args) (do
     --     print "exited forcefully"
     --     exitSuccess)
  
@@ -56,9 +55,8 @@ main = do
     let result = parseString asdf
 
     str <- readFile "asdf.css"
-    let out = CT.parseString $ str
+    let out = CT.parseString str
     let outer = CP.parseList $ fromRight [] $ snd out
     let outest = H.parseWebpage (_emitted result) outer
 
-    print outest
     Mortar.appIt outest Mortar.initialState

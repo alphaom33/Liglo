@@ -1,21 +1,10 @@
 {-# LANGUAGE DeriveGeneric #-}
 module Network where
 
-import System.Environment (getArgs, lookupEnv)
-import Brick as B
 import Data.Aeson (FromJSON, ToJSON)
 import GHC.Generics (Generic)
 import Network.HTTP.Simple as S
-import Data.Maybe (fromJust)
-import Brick.Focus (focusRingCursor)
-import Brick.Forms (Form(formFocus, formState), handleFormEvent)
-import Lens.Micro.Extras (view)
-import Message (Message(NewSearch, NextPage, LastPage))
-import Control.Monad (join)
-import Data.Text (Text, unpack)
 import Item (Item)
-
-import Debug.Trace
 
 newtype GoogleResponse = GoogleResponse {
     items :: [Item]

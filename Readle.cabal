@@ -15,7 +15,6 @@ cabal-version: >=1.10
 library Readle-lib
     exposed-modules: 
         SearchApp
-        Webpage
         Message
         Network
         HTMLParser
@@ -46,6 +45,7 @@ library Readle-lib
         regex-tdfa >= 1.3.2.3,
         terminal-size >= 0.3.3,
         split >= 0.2.5
+    ghc-options: -Wall -Wno-x-partial
     default-language: Haskell2010
 
 executable Readle
@@ -69,6 +69,7 @@ executable Readle
         containers >= 0.7,
         split >= 0.2.5,
         Readle-lib
+    ghc-options: -Wno-x-partial
     hs-source-dirs: app
     default-language: Haskell2010
 
@@ -83,4 +84,5 @@ test-suite tests
         HUnit >= 1.6.2.0,
         Readle-lib
     hs-source-dirs: test
+    ghc-options: -Wno-x-partial
     default-language: Haskell2010

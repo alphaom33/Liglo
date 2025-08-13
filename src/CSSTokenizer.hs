@@ -1,4 +1,5 @@
-{-# LANGUAGE MultiWayIf #-}
+{-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE TupleSections #-}
 
 module CSSTokenizer where
 
@@ -9,11 +10,8 @@ import Data.Char
 
 import HTMLParser (tracer)
 
-import Control.Monad (return)
-import Control.Exception (catch)
-
 type Error = String
-data Parser a = Parser { parse :: String -> (String, Either Error a)}
+newtype Parser a = Parser { parse :: String -> (String, Either Error a)}
 
 instance Functor Parser where
     fmap f (Parser f2) = Parser $ \ stream -> case f2 stream of
@@ -21,7 +19,7 @@ instance Functor Parser where
         (rest, Left err) -> (rest, Left err)
 
 instance Applicative Parser where
-    pure a = Parser $ \ stream -> (stream, Right a)
+    pure a = Parser (, Right a)
     Parser ff <*> Parser xx = Parser $ \ stream -> case ff stream of
         (rest, Left err) -> (rest, Left err)
         (rest, Right f) -> case xx rest of
@@ -29,39 +27,44 @@ instance Applicative Parser where
             (rest', Right x) -> (rest', Right $ f x)
 
 instance Alternative Parser where
-    empty = Parser $ \ stream -> (stream, Left "empty")
+    empty = Parser (, Left "empty")
     (<|>) = orElse
     many = manyParser
     some = someParser
 
+orElse :: Parser a -> Parser a -> Parser a
 orElse (Parser f0) (Parser f1) = Parser $ \ stream -> case f0 stream of
     (rest, Right out) -> (rest, Right out)
-    (rest, Left _) -> f1 stream
+    (_, Left _) -> f1 stream
 
+manyParser :: Parser a -> Parser [a]
 manyParser (Parser f) = Parser $ fix $ \ this stream -> case f stream of
     (_, Left _) -> (stream, Right [])
     (rest, Right a) -> case this rest of
         (rest', Left err) -> (rest', Left err)
         (rest', Right as) -> (rest', Right $ a : as)
 
+parseUntil :: Parser a1 -> Parser a2 -> Parser [a1]
 parseUntil (Parser f) (Parser end) = Parser $ fix $ \ this stream -> case end stream of
     (rest, Right _) -> (rest, Right [])
-    (_, Left err) -> case f stream of
+    (_, Left _) -> case f stream of
         (rest, Left err) -> (rest, Left err)
         (rest, Right a) -> case this rest of
             (rest', Left err) -> (rest', Left err)
             (rest', Right as) -> (rest', Right $ a : as)
 
+someParser :: Parser a -> Parser [a]
 someParser (Parser f) = Parser $ \ stream -> case f stream of
-    (rest, Right a) -> 
-        let (Parser fany) = (manyParser $ Parser f) 
+    (rest, Right a) ->
+        let (Parser fany) = (manyParser $ Parser f)
         in case fany rest of
             (rest', Left err) -> (rest', Left err)
             (rest', Right as) -> (rest', Right $ a : as)
     (rest, Left err) -> (rest, Left err)
 
+numParser :: (Eq t, Num t) => t -> Parser a -> Parser [a]
 numParser num (Parser f) = Parser (go num)
-    where 
+    where
         go 0 stream = (stream, Right [])
         go num stream = case f stream of
             (rest, Right a) -> case go (num - 1) rest of
@@ -69,18 +72,22 @@ numParser num (Parser f) = Parser (go num)
                 (rest', Left err) -> (rest', Left err)
             (rest, Left err) -> (rest, Left err)
 
+try :: Parser a -> Parser a
 try (Parser f) = Parser $ \ stream -> case f stream of
     (rest, Right a) -> (rest, Right a)
     (_, Left err) -> (stream, Left err)
 
-satisfy f = Parser $ \ stream -> case stream of
+satisfy :: (Char -> Bool) -> Parser Char
+satisfy f = Parser $ \case
     [] -> ("", Left "end of stream")
-    (c:cs) 
+    (c:cs)
         | f c -> (cs, Right c)
         | otherwise -> (cs, Left "did not satisfy")
 
-pluralate p = ((:) <$> p <*> pure [])
+pluralate :: Applicative f => f a -> f [a]
+pluralate p = (:) <$> p <*> pure []
 
+passes :: Parser a -> Parser Bool
 passes (Parser f) = Parser $ \ stream -> case f stream of
     (_, Right _) -> (stream, Right True)
     (_, Left _) -> (stream, Right False)
@@ -139,8 +146,7 @@ matchChar :: Char -> Parser Char
 matchChar c = satisfy (== c)
 
 matchString :: String -> Parser String
-matchString [] = pure []
-matchString (c:cs) = (:) <$> matchChar c <*> matchString cs
+matchString = foldr (\ c -> (<*>) ((:) <$> matchChar c)) (pure [])
 
 matchNotString :: String -> Parser String
 matchNotString str = Parser $ \ stream -> case eater stream of
@@ -148,19 +154,33 @@ matchNotString str = Parser $ \ stream -> case eater stream of
         then (rest, Left "not match")
         else (drop 1 stream, Right a)
     (rest, Left err) -> (rest, Left err)
-    where (Parser eater) = numParser (length str) (satisfy $ \ _ -> True)
+    where (Parser eater) = numParser (length str) (satisfy $ const True)
 
 matchWhitespace :: Parser Char
 matchWhitespace = matchChar '\n' <|> matchChar '\t' <|> matchChar ' '
 
+matchDigit :: Parser Char
 matchDigit = satisfy (`elem` "0123456789")
+
+matchUppercaseLetter :: Parser Char
 matchUppercaseLetter = satisfy (`elem` "ABCDEFGHIJKLMNOPQRSTUVWXYZ")
+
+matchLowercaseLetter :: Parser Char
 matchLowercaseLetter = satisfy (`elem` "abcdefghijklmnopqrstuvwxyz")
+
+matchLetter :: Parser Char
 matchLetter = matchUppercaseLetter <|> matchLowercaseLetter
+
+matchNonAscii :: Parser Char
 matchNonAscii = satisfy (\ c -> ord c >= 0x80)
+
+matchIdentStart :: Parser Char
 matchIdentStart = matchLetter <|> matchNonAscii <|> matchChar '_' <|> matchChar '.'
+
+matchIdent :: Parser Char
 matchIdent = matchIdentStart <|> matchDigit <|> matchChar '-'
 
+matchHex :: Parser Char
 matchHex = satisfy (`elem` "0123456789abcdefABCDEF")
 
 consumeWhitespace :: Parser CSSToken
@@ -171,12 +191,10 @@ characterEscape :: Parser Char
 characterEscape = dropFirst <$>
     matchChar '\\'
     <*> (matchChar '\n'
-        <|> tracer <$> readIt <$> someParser matchHex
-        <|> (satisfy $ \ _ -> True))
-    where 
-        dropAll _ = '\0'
+        <|> tracer . readIt <$> someParser matchHex
+        <|> satisfy (const True))
+    where
         dropFirst _ a = a
-        dropLast a _ = a
         readIt str =
             let readed = read $ "0x" ++ str
             in if readed == 0
@@ -187,26 +205,28 @@ eatStringInsides :: Char -> Parser CSSToken
 eatStringInsides endingCodePoint = Parser $ \ stream -> case go stream of
         (rest, Left _) -> (rest, Right BadStringToken)
         (rest, Right a) -> (rest, Right $ StringToken $ filter (/= '\0') a)
-    where 
+    where
         (Parser regulari) = characterEscape <|> satisfy (/= endingCodePoint)
         go stream = case stream of
             [] -> ("", Right [])
             ('\n':rest) -> (rest, Left "newline")
             _ -> case regulari stream of
-                (rest, Left err) -> (stream, Right [])
+                (_, Left _) -> (stream, Right [])
                 (rest, Right a) -> case go rest of
                     (rest', Right as) -> (rest', Right $ a : as)
                     unreachable -> unreachable
 
 consumeString :: Char -> Parser CSSToken
-consumeString endingCodePoint = dropDels <$> 
+consumeString endingCodePoint = dropDels <$>
     matchChar endingCodePoint <*>
     eatStringInsides endingCodePoint <*>
     makeOptional (pluralate $ matchChar endingCodePoint)
     where dropDels _ a _ = a
 
+matchEscape :: Parser [Char]
 matchEscape = sequentiate (:) [matchChar '\\', satisfy (/= '\n')]
 
+checkWouldStartIdentSequence :: Parser [Char]
 checkWouldStartIdentSequence = sequentiate (++) [
     matchString "-"
     , pluralate matchIdentStart <|> matchString "-" <|> matchEscape
@@ -214,9 +234,11 @@ checkWouldStartIdentSequence = sequentiate (++) [
     <|> pluralate matchIdentStart
     <|> matchEscape
 
+consumeIdentSequence :: Parser [Char]
 consumeIdentSequence = manyParser $ characterEscape <|> matchIdent
 
-consumeHash = dropFirst <$> matchChar '#' <*> (Parser $ \ stream ->
+consumeHash :: Parser CSSToken
+consumeHash = dropFirst <$> matchChar '#' <*> Parser (\ stream ->
     let (Parser check) = matchIdent <|> characterEscape
     in case check stream of
         (_, Right _) -> doHashy stream
@@ -225,32 +247,37 @@ consumeHash = dropFirst <$> matchChar '#' <*> (Parser $ \ stream ->
         dropFirst _ a = a
         (Parser doHashy) = HashToken <$> ((,) <$> passes checkWouldStartIdentSequence <*> consumeIdentSequence)
 
+consume :: Functor f => (t -> f a) -> b -> t -> f b
 consume matchy out char = mhm <$> matchy char
     where mhm _ = out
 
+consumeCharacter :: b -> Char -> Parser b
 consumeCharacter = consume matchChar
 
-sequentiate f [] = pure []
-sequentiate f (p:ps) = (f) <$> p <*> sequentiate f ps
+sequentiate :: Applicative f => (a1 -> [a2] -> [a2]) -> [f a1] -> f [a2]
+sequentiate f = foldr (\ p -> (<*>) (f <$> p)) (pure [])
 
+makeOptional :: Parser String -> Parser String
 makeOptional (Parser f) = Parser $ \ stream -> case f stream of
     (rest, Right a) -> (rest, Right a)
     (_, Left _) -> (stream, Right "")
 
+killMe :: Parser a -> Parser a -> Parser a
 killMe (Parser other) (Parser this) = Parser $ \ stream -> case this stream of
     (rest, Right a) -> (rest, Right a)
     (rest, Left _) -> other rest
 
+checkDigit :: Parser Float
 checkDigit = ready (sequentiate (++) [
     makeOptional (matchString "+" <|> matchString "-")
     , orAnd (someParser matchDigit) ((:) <$> matchChar '.' <*> someParser matchDigit)
     , makeOptional $ sequentiate (++) [
-        (matchString "e" <|> matchString "E")
-        , makeOptional (matchString "+" <|> matchString "-") 
+        matchString "e" <|> matchString "E"
+        , makeOptional (matchString "+" <|> matchString "-")
         , someParser matchDigit
         ]
     ])
-    where 
+    where
         ready (Parser f) = Parser $ \ stream -> case f stream of
             (rest, Right []) -> (rest, Left "")
             (rest, Right a) -> (rest, Right $ read $ go a)
@@ -265,22 +292,25 @@ checkDigit = ready (sequentiate (++) [
                 (_, Left err) -> (rest, Right a)
             (_, Left _) -> g stream
 
+consumeNumeric :: Parser CSSToken
 consumeNumeric =
     (DimensionToken <$> ((,) <$> checkDigit <*> eatByStart checkWouldStartIdentSequence consumeIdentSequence))
     <|> (PercentageToken <$> (dropLast <$> checkDigit <*> matchChar '%'))
     <|> (NumberToken <$> checkDigit)
     where dropLast a _ = a
 
-consumeUrl = killMe (dropAll <$> manyParser (characterEscape <|> satisfy (/= ')')) <*> matchChar ')') $ UrlToken <$> parseUntil 
-    (characterEscape <|> satisfy (\ c -> not $ c `elem` "'\"("))
+consumeUrl :: Parser CSSToken
+consumeUrl = killMe (dropAll <$> manyParser (characterEscape <|> satisfy (/= ')')) <*> matchChar ')') $ UrlToken <$> parseUntil
+    (characterEscape <|> satisfy (`notElem` "'\"("))
     ((++) <$> manyParser matchWhitespace <*> matchString ")")
     where dropAll _ _ = BadUrlToken
 
-consumeIdentLike = 
+consumeIdentLike :: Parser CSSToken
+consumeIdentLike =
     urly
     <|> FunctionToken <$> (dropLast <$> consumeIdentSequence <*> matchChar '(')
     <|> IdentToken <$> consumeIdentSequence
-    where 
+    where
         urly = Parser $ \ stream -> case beginn stream of
             (rest, Right _) -> case strart rest of
                 (_, Right _) -> (rest, Right $ FunctionToken "url")
@@ -289,25 +319,28 @@ consumeIdentLike =
         (Parser strart) = matchChar '\'' <|> matchChar '"'
         (Parser beginn) = sequentiate (++) [
             matchString "url("
-            , foldr (++) "" <$> manyParser (numParser 2 matchWhitespace)
+            , concat <$> manyParser (numParser 2 matchWhitespace)
             , makeOptional $ pluralate matchWhitespace
             ]
         dropLast a _ = a
 
+eatByStart :: Parser a1 -> Parser a2 -> Parser a2
 eatByStart (Parser check) (Parser consumer) = Parser $ \ stream -> case check stream of
     (_, Right _) -> consumer stream
     (rest, Left err) -> (rest, Left err)
 
+postProcess :: [CSSToken] -> [CSSToken]
 postProcess out = filter (not . (`elem` [WhitespaceToken, NothingToken])) $ out ++ [EOFToken]
 
+parseString :: String -> (String, Either Error [CSSToken])
 parseString str =
     let preProcessed = preProcess str
-    in  (parse (postProcess <$> manyParser (
+    in  parse (postProcess <$> manyParser (
                 consumeComment
-                <|> consumeWhitespace 
-                <|> consumeString '"' 
-                <|> consumeHash 
-                <|> consumeString '\'' 
+                <|> consumeWhitespace
+                <|> consumeString '"'
+                <|> consumeHash
+                <|> consumeString '\''
                 <|> consumeCharacter OpeningParenthesisToken '('
                 <|> consumeCharacter ClosingParenthesisToken ')'
                 <|> consumeNumeric
@@ -323,8 +356,8 @@ parseString str =
                 <|> consumeCharacter OpeningCurlyBracketToken '{'
                 <|> consumeCharacter ClosingCurlyBracketToken '}'
                 <|> eatByStart matchIdentStart consumeIdentLike
-                <|> Parser (\ stream -> case stream of
+                <|> Parser (\case
                     [] -> ("", Left "end of stream")
                     (c:str) -> (str, Right $ DelimToken c))
-            )) preProcessed)
+            )) preProcessed
 

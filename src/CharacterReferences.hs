@@ -3,6 +3,7 @@ module CharacterReferences where
 import Data.Char (toLower)
 import qualified Data.Map as Map
 
+characterReferences :: Map.Map String Char
 characterReferences = Map.fromList [
     ("Aacute;", '\x000C1')
     , ("Aacute", '\x000C1')

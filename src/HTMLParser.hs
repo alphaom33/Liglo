@@ -3,7 +3,6 @@
 {-# LANGUAGE TupleSections #-}
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE MultiWayIf #-}
-{-# OPTIONS_GHC -Wall #-}
 
 module HTMLParser where
 
@@ -11,9 +10,8 @@ import Debug.Trace (trace)
 
 import Lens.Micro.TH (makeLenses)
 import Lens.Micro (set, over)
-import Data.Char (toLower)
+import Data.Char (toLower, chr)
 import Data.Map (keys, (!))
-import Data.Char (chr)
 import Data.List (sortOn)
 
 import CharacterReferences
@@ -21,7 +19,7 @@ import CharacterReferences
 tracer :: Show a => a -> a
 tracer a = trace (show a) a
 
-data Attribute = Attribute (String, String) deriving (Show, Eq, Ord)
+newtype Attribute = Attribute (String, String) deriving (Show, Eq, Ord)
 
 data Tag = Tag {
     _tagName :: String
@@ -35,92 +33,92 @@ makeTag :: Bool -> Tag
 makeTag start = Tag {_tagName="", _attrs=[], _selfClosing=False, _opening=start}
 
 preProcess :: String -> String
-preProcess str = filter (/= '\r') str
+preProcess = filter (/= '\r')
 
-data StateMachineState = 
-    DataState 
-    | CharacterReferenceState 
-    | TagOpenState 
-    | RCDataState 
-    | RawTextState 
-    | RCDataLessThanSignState 
-    | ScriptDataState 
-    | ScriptDataLessThanSignState 
-    | PlainTextState 
-    | MarkupDeclarationOpenState 
-    | EndTagOpenState 
-    | RawTextLessThanSignState 
-    | TagNameState 
-    | BogusCommentState 
-    | BeforeAttributeNameState 
-    | SelfClosingStartTag 
-    | RCDataEndTagOpenState 
-    | RCDataEndTagNameState 
-    | RawTextEndTagOpenState 
-    | RawTextEndTagNameState 
-    | ScriptDataEndTagOpenState 
-    | ScriptDataEscapeStartState 
-    | ScriptDataEndTagNameState 
-    | ScriptDataEscapeStartDashState 
-    | ScriptDataEscapedDashDashState 
-    | ScriptDataEscapedState 
-    | ScriptDataEscapedDashState 
-    | ScriptDataEscapedLessThanSignState 
-    | ScriptDataEscapedEndTagOpenState 
-    | ScriptDataDoubleEscapeStartState 
-    | ScriptDataEscapedEndTagNameState 
-    | ScriptDataDoubleEscapedState 
-    | ScriptDataDoubleEscapedLessThanSignState 
-    | ScriptDataDoubleEscapedDashState 
-    | ScriptDataDoubleEscapedDashDashState 
-    | ScriptDataDoubleEscapeEndState 
-    | AfterAttributeNameState 
-    | AttributeNameState 
-    | BeforeAttributeValueState 
-    | AttributeValueDoubleQuotedState 
-    | AttributeValueSingleQuotedState 
-    | AttributeValueUnquotedState 
-    | AfterAttributeValueQuotedState 
-    | DOCTYPEState 
-    | CommentStartState 
-    | CDATASectionState 
-    | CommentStartDashState 
-    | CommentState 
-    | CommentEndState 
-    | CommentEndDashState 
-    | CommentLessThanSignState 
-    | CommentLessThanSignBangState 
-    | CommentLessThanSignBangDashState 
-    | CommentLessThanSignBangDashDashState 
-    | CommentEndBangState 
-    | BeforeDOCTYPENameState 
-    | DOCTYPENameState 
-    | AfterDOCTYPENameState 
-    | AfterDOCTYPEPublicKeywordState 
-    | AfterDOCTYPESystemKeywordState 
-    | BogusDOCTYPEState 
-    | BeforeDOCTYPEPublicIdentifierState 
-    | DOCTYPEPublicIdentifierDoubleQuotedState 
-    | DOCTYPEPublicIdentifierSingleQuotedState 
-    | AfterDOCTYPEPublicIdentifierState 
-    | BetweenDOCTYPEPublicAndSystemIdentifiersState 
-    | DOCTYPESystemIdentifierDoubleQuotedState 
-    | DOCTYPESystemIdentifierSingleQuotedState 
-    | BeforeDOCTYPESystemIdentifierState 
-    | AfterDOCTYPESystemIdentifierState 
-    | CDATASectionBracketState 
-    | CDATASectionEndState 
-    | NamedCharacterReferenceState 
-    | NumericCharacterReferenceState 
-    | AmbiguousAmpersandState 
-    | DecimalCharacterReferenceStartState 
-    | HexadecimalCharacterReferenceState 
-    | HexadecimalCharacterReferenceStartState 
-    | DecimalCharacterReferenceState 
+data StateMachineState =
+    DataState
+    | CharacterReferenceState
+    | TagOpenState
+    | RCDataState
+    | RawTextState
+    | RCDataLessThanSignState
+    | ScriptDataState
+    | ScriptDataLessThanSignState
+    | PlainTextState
+    | MarkupDeclarationOpenState
+    | EndTagOpenState
+    | RawTextLessThanSignState
+    | TagNameState
+    | BogusCommentState
+    | BeforeAttributeNameState
+    | SelfClosingStartTag
+    | RCDataEndTagOpenState
+    | RCDataEndTagNameState
+    | RawTextEndTagOpenState
+    | RawTextEndTagNameState
+    | ScriptDataEndTagOpenState
+    | ScriptDataEscapeStartState
+    | ScriptDataEndTagNameState
+    | ScriptDataEscapeStartDashState
+    | ScriptDataEscapedDashDashState
+    | ScriptDataEscapedState
+    | ScriptDataEscapedDashState
+    | ScriptDataEscapedLessThanSignState
+    | ScriptDataEscapedEndTagOpenState
+    | ScriptDataDoubleEscapeStartState
+    | ScriptDataEscapedEndTagNameState
+    | ScriptDataDoubleEscapedState
+    | ScriptDataDoubleEscapedLessThanSignState
+    | ScriptDataDoubleEscapedDashState
+    | ScriptDataDoubleEscapedDashDashState
+    | ScriptDataDoubleEscapeEndState
+    | AfterAttributeNameState
+    | AttributeNameState
+    | BeforeAttributeValueState
+    | AttributeValueDoubleQuotedState
+    | AttributeValueSingleQuotedState
+    | AttributeValueUnquotedState
+    | AfterAttributeValueQuotedState
+    | DOCTYPEState
+    | CommentStartState
+    | CDATASectionState
+    | CommentStartDashState
+    | CommentState
+    | CommentEndState
+    | CommentEndDashState
+    | CommentLessThanSignState
+    | CommentLessThanSignBangState
+    | CommentLessThanSignBangDashState
+    | CommentLessThanSignBangDashDashState
+    | CommentEndBangState
+    | BeforeDOCTYPENameState
+    | DOCTYPENameState
+    | AfterDOCTYPENameState
+    | AfterDOCTYPEPublicKeywordState
+    | AfterDOCTYPESystemKeywordState
+    | BogusDOCTYPEState
+    | BeforeDOCTYPEPublicIdentifierState
+    | DOCTYPEPublicIdentifierDoubleQuotedState
+    | DOCTYPEPublicIdentifierSingleQuotedState
+    | AfterDOCTYPEPublicIdentifierState
+    | BetweenDOCTYPEPublicAndSystemIdentifiersState
+    | DOCTYPESystemIdentifierDoubleQuotedState
+    | DOCTYPESystemIdentifierSingleQuotedState
+    | BeforeDOCTYPESystemIdentifierState
+    | AfterDOCTYPESystemIdentifierState
+    | CDATASectionBracketState
+    | CDATASectionEndState
+    | NamedCharacterReferenceState
+    | NumericCharacterReferenceState
+    | AmbiguousAmpersandState
+    | DecimalCharacterReferenceStartState
+    | HexadecimalCharacterReferenceState
+    | HexadecimalCharacterReferenceStartState
+    | DecimalCharacterReferenceState
     | NumericCharacterReferenceEndState
     deriving (Show, Eq)
 
-data Comment = Comment String deriving (Show, Eq)
+newtype Comment = Comment String deriving (Show, Eq)
 
 data DOCTYPE = DOCTYPE {
     _enableQuirksFlag :: Bool
@@ -130,9 +128,9 @@ data DOCTYPE = DOCTYPE {
 } deriving (Show, Eq)
 $(makeLenses ''DOCTYPE)
 
-data Token = 
+data Token =
     Character Char
-    | TagToken Tag 
+    | TagToken Tag
     | CommentToken Comment
     | DOCTYPEToken DOCTYPE
     | EOF deriving (Show, Eq)
@@ -155,7 +153,7 @@ $(makeLenses ''State)
 
 getNextInputCharacter :: State -> (State, Char)
 getNextInputCharacter state =
-    let out = (_input state)!!0
+    let out = head $ _input state
     in (over input (drop 1) state, out)
 
 emitToken :: Token -> State -> State
@@ -165,7 +163,7 @@ emitToken (TagToken t) state = (if _opening t
 emitToken token state = _emitToken token state
 
 _emitToken :: Token -> State -> State
-_emitToken token state = over emitted (token:) $ set lastEmitted token $ state
+_emitToken token state = over emitted (token:) $ set lastEmitted token state
 
 doStateMachine :: State -> State
 doStateMachine state = case _stateMachineState state of
@@ -203,7 +201,7 @@ doStateMachine state = case _stateMachineState state of
 
     TagOpenState
         | nextInputCharacter == '!' -> set stateMachineState MarkupDeclarationOpenState state'
-        | nextInputCharacter == '/' -> set stateMachineState EndTagOpenState state' 
+        | nextInputCharacter == '/' -> set stateMachineState EndTagOpenState state'
         | isAlpha nextInputCharacter -> set stateMachineState TagNameState $ set currentTagToken (makeTag True) state
         | nextInputCharacter == '?' -> set stateMachineState BogusCommentState $ set currentCommentToken (Comment "") state
         | nextInputCharacter == '\xfffa' -> emitToken EOF $ emitToken (Character '<') state'
@@ -345,7 +343,7 @@ doStateMachine state = case _stateMachineState state of
         | nextInputCharacter `elem` "\t\n\f />#" -> set stateMachineState AfterAttributeNameState state
         | nextInputCharacter == '=' -> set stateMachineState BeforeAttributeValueState state'
         | nextInputCharacter == '\0' -> appendToAttrName '\xfffd' state'
-        | otherwise -> appendToAttrName (toLower nextInputCharacter) state' 
+        | otherwise -> appendToAttrName (toLower nextInputCharacter) state'
 
     AfterAttributeNameState
         | nextInputCharacter `elem` "\t\n\f " -> state'
@@ -392,7 +390,7 @@ doStateMachine state = case _stateMachineState state of
         | otherwise -> set stateMachineState BeforeAttributeNameState state
 
     SelfClosingStartTag -> case nextInputCharacter of
-        '>' -> 
+        '>' ->
             let state'' = over currentTagToken (set selfClosing True) state'
             in emitToken (TagToken $ _currentTagToken state'') $ set stateMachineState DataState state''
         '\xfffa' -> emitToken EOF state'
@@ -463,7 +461,7 @@ doStateMachine state = case _stateMachineState state of
         '-' -> set stateMachineState CommentEndDashState $ appendToComment '!' $ appendToComment '-' $ appendToComment '-' state'
         '>' -> emitToken (CommentToken $ _currentCommentToken state') $ set stateMachineState DataState state'
         '\xfffa' -> emitToken EOF $ emitToken (CommentToken $ _currentCommentToken state') state'
-        _ -> set stateMachineState CommentState $ appendToComment '!' $ appendToComment '-' $ appendToComment '-' $ state
+        _ -> set stateMachineState CommentState $ appendToComment '!' $ appendToComment '-' $ appendToComment '-' state
 
     DOCTYPEState
         | nextInputCharacter `elem` "\t\n\f " -> set stateMachineState BeforeDOCTYPENameState state'
@@ -483,7 +481,7 @@ doStateMachine state = case _stateMachineState state of
         | nextInputCharacter `elem` "\t\n\f " -> set stateMachineState AfterDOCTYPENameState state'
         | nextInputCharacter == '>' -> emitToken (DOCTYPEToken $ _currentDOCTYPEToken state') $ set stateMachineState DataState state'
         | nextInputCharacter == '\0' -> appendToDOCTYPE '\xfffd' name state'
-        | nextInputCharacter == '\xfffa' -> emitToken EOF $ emitToken (DOCTYPEToken $ _currentDOCTYPEToken state') $ setDOCTYPEFlag $ state'
+        | nextInputCharacter == '\xfffa' -> emitToken EOF $ emitToken (DOCTYPEToken $ _currentDOCTYPEToken state') $ setDOCTYPEFlag state'
         | otherwise -> appendToDOCTYPE (toLower nextInputCharacter) name state'
 
     AfterDOCTYPENameState
@@ -601,18 +599,18 @@ doStateMachine state = case _stateMachineState state of
         | isAlphanumeric nextInputCharacter -> set stateMachineState NamedCharacterReferenceState $ setBuf state
         | nextInputCharacter == '\xfffa' -> set stateMachineState NumericCharacterReferenceState $ appendToTemporaryBuffer [nextInputCharacter] $ setBuf state'
         | otherwise -> set stateMachineState (_returnState state') $ flushCodePoints $ setBuf state'
-        where setBuf s = set temporaryBuffer "&" s
+        where setBuf = set temporaryBuffer "&"
 
-    NamedCharacterReferenceState -> if length checked /= 0
+    NamedCharacterReferenceState -> if not $ null checked
         then if partOfAnAttribute state' && not semicoloned && (nextInputCharacter == '=' || isAlphanumeric nextInputCharacter)
             then set stateMachineState (_returnState state') $ flushCodePoints state'
-            else set stateMachineState (_returnState state) $ flushCodePoints $ set temporaryBuffer [(characterReferences ! om)] $ set input rester state
+            else set stateMachineState (_returnState state) $ flushCodePoints $ set temporaryBuffer [characterReferences ! om] $ set input rester state
         else set stateMachineState AmbiguousAmpersandState $ flushCodePoints state'
-        where 
+        where
             checked = filter (\ key -> key == take (length key) (_input state)) $ keys characterReferences
-            om = (reverse $ sortOn length checked)!!0
+            om = last $ sortOn length checked
             rest = drop (length om) (_input state)
-            semicoloned = rest!!0 == ';'
+            semicoloned = head rest == ';'
             rester = drop (if semicoloned then 1 else 0) rest
 
     AmbiguousAmpersandState -> if isAlphanumeric nextInputCharacter
@@ -624,7 +622,7 @@ doStateMachine state = case _stateMachineState state of
     NumericCharacterReferenceState -> if toLower nextInputCharacter == 'x'
         then set stateMachineState HexadecimalCharacterReferenceStartState $ appendToTemporaryBuffer [nextInputCharacter] $ getBuf state'
         else set stateMachineState DecimalCharacterReferenceStartState $ getBuf state
-        where getBuf s = set characterReferenceCode 0 s
+        where getBuf = set characterReferenceCode 0
 
     HexadecimalCharacterReferenceStartState -> if isHexDigit nextInputCharacter
         then set stateMachineState HexadecimalCharacterReferenceState state
@@ -635,54 +633,54 @@ doStateMachine state = case _stateMachineState state of
         else set stateMachineState (_returnState state') $ flushCodePoints state
 
     HexadecimalCharacterReferenceState
-        | isHexDigit nextInputCharacter -> over characterReferenceCode (\ n -> n * 16 + (hexToInt nextInputCharacter)) state'
+        | isHexDigit nextInputCharacter -> over characterReferenceCode (\ n -> n * 16 + hexToInt nextInputCharacter) state'
         | nextInputCharacter == ';' -> set stateMachineState NumericCharacterReferenceEndState state'
         | otherwise -> set stateMachineState NumericCharacterReferenceEndState state
 
     DecimalCharacterReferenceState
-        | isHexDigit nextInputCharacter -> over characterReferenceCode (\ n -> n * 10 + (read [nextInputCharacter])) state'
+        | isHexDigit nextInputCharacter -> over characterReferenceCode (\ n -> n * 10 + read [nextInputCharacter]) state'
         | nextInputCharacter == ';' -> set stateMachineState NumericCharacterReferenceEndState state'
         | otherwise -> set stateMachineState NumericCharacterReferenceEndState state
 
     NumericCharacterReferenceEndState
         | code == 0 || code > 0x10ffff || isSurrogate code -> set characterReferenceCode 0xfffd state
-        | code == 0x0d || (isControl code && (not $ isWhitespace code)) -> set characterReferenceCode (errToCodePoint ! fromIntegral code) state
+        | code == 0x0d || (isControl code && not (isWhitespace code)) -> set characterReferenceCode (errToCodePoint ! fromIntegral code) state
         | otherwise -> set stateMachineState (_returnState state) $ flushCodePoints $ set temporaryBuffer [chr code] state
         where code = _characterReferenceCode state
 
     where
-        startAttribute s = over currentTagToken (\ tag -> over attrs (Attribute ("", ""):) tag) s
+        startAttribute = over currentTagToken (over attrs (Attribute ("", ""):))
 
-        partOfAnAttribute s = (_returnState s) `elem` [AttributeValueDoubleQuotedState, AttributeValueSingleQuotedState, AttributeValueUnquotedState]
+        partOfAnAttribute s = _returnState s `elem` [AttributeValueDoubleQuotedState, AttributeValueSingleQuotedState, AttributeValueUnquotedState]
 
         flushCodePoints s = set temporaryBuffer "" (if partOfAnAttribute s
             then s
-            else foldr emitToken s (map Character $ _temporaryBuffer s))
+            else foldr (emitToken . Character) s (_temporaryBuffer s))
 
-        appendToTemporaryBuffer c s = over temporaryBuffer (++c) s
+        appendToTemporaryBuffer c = over temporaryBuffer (++c)
 
-        createDoctype s = set currentDOCTYPEToken DOCTYPE {_enableQuirksFlag=False, _name=Nothing, _system=Nothing, _public=Nothing} s
+        createDoctype = set currentDOCTYPEToken DOCTYPE {_enableQuirksFlag=False, _name=Nothing, _system=Nothing, _public=Nothing}
 
         setDOCTYPEFlag = over currentDOCTYPEToken (set enableQuirksFlag True)
 
         setDOCTYPEInitial setter = over currentDOCTYPEToken (set setter $ Just "")
 
         appendToDOCTYPE toAppend setter = over currentDOCTYPEToken (over setter doAppend)
-            where 
+            where
                 doAppend (Just str) = Just $ str ++ [toAppend]
                 doAppend Nothing = Just [toAppend]
 
-        appendToAttrName c s = over currentTagToken (over attrs $ doThing c) s
+        appendToAttrName = over currentTagToken . over attrs . doThing
             where
-                doThing toAppend a = doThinger toAppend (a!!0) : drop 1 a
+                doThing toAppend a = doThinger toAppend (head a) : drop 1 a
                 doThinger toAppend (Attribute attr) = Attribute (fst attr ++ [toAppend], snd attr)
 
-        appendToAttr c s = over currentTagToken (over attrs $ doThing c) s
+        appendToAttr = over currentTagToken . over attrs . doThing
             where
-                doThing toAppend a = doThinger toAppend (a!!0) : drop 1 a
+                doThing toAppend a = doThinger toAppend (head a) : drop 1 a
                 doThinger toAppend (Attribute attr) = Attribute (fst attr, snd attr ++ [toAppend])
 
-        appendToComment c s = over currentCommentToken (\ (Comment thing) -> Comment $ thing ++ [c]) s
+        appendToComment c = over currentCommentToken (\ (Comment thing) -> Comment $ thing ++ [c])
 
         (state', nextInputCharacter) = getNextInputCharacter state
 
@@ -697,21 +695,21 @@ doStateMachine state = case _stateMachineState state of
             | appropriateEndTagToken && nextInputCharacter == '/' = set stateMachineState SelfClosingStartTag state'
             | appropriateEndTagToken && nextInputCharacter == '>' = emitToken (TagToken $ _currentTagToken state') (set stateMachineState DataState state')
             | isAlpha nextInputCharacter = over temporaryBuffer (++[toLower nextInputCharacter]) $ appendCharacter nextInputCharacter
-            | otherwise = set stateMachineState endState (foldr (\ a b -> emitToken (Character a) b) (emitToken (Character '/') (emitToken (Character '<') state)) (_temporaryBuffer state))
+            | otherwise = set stateMachineState endState (foldr (emitToken . Character) (emitToken (Character '/') (emitToken (Character '<') state)) (_temporaryBuffer state))
 
         hexToInt c = read $ "0x" ++ [c]
 
-        checkWord w = 
+        checkWord w =
             let (first, rest) = splitAt (length w) (_input state)
             in (rest, first == w)
 
-        checkWordIgnoreCase w = 
+        checkWordIgnoreCase w =
             let (first, rest) = splitAt (length w) (_input state)
             in (rest, map toLower first == map toLower w)
 
 
 parseString :: String -> State
-parseString str = 
+parseString str =
     over emitted reverse $ _parseString State {
         _stateMachineState = DataState
         , _returnState = DataState
@@ -722,7 +720,7 @@ parseString str =
         , _temporaryBuffer = ""
         , _characterReferenceCode = 0
 
-        , _lastEmitted = (Character 'a')
+        , _lastEmitted = Character 'a'
         , _lastStart = Nothing
         , _emitted = []
     }
