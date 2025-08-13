@@ -60,4 +60,5 @@ main = do
     let outer = CP.parseList $ fromRight [] $ snd out
     let outest = H.parseWebpage (_emitted result) outer
 
+    print outest
     Mortar.appIt outest Mortar.initialState

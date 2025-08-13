@@ -33,13 +33,13 @@ type SelectorNode = ([Selector], [ComponentValue])
 data BuilderData = BuilderData {
     _toRead :: [Token]
     , _openTags :: [Tag]
-    , _out :: String
+    , _out :: [String]
     , _currentText :: String
     , _style :: Tree (Selector, CSSAttribute)
     , _lined :: Bool
 }
 $(makeLenses ''BuilderData)
-builderData emittedTokens style = BuilderData {_openTags=[], _toRead=emittedTokens, _out="", _currentText="", _style=style, _lined=True}
+builderData emittedTokens style = BuilderData {_openTags=[], _toRead=emittedTokens, _out=[], _currentText="", _style=style, _lined=True}
 
 makeWidget :: BuilderData -> CSSAttribute
 makeWidget mhm = applyStyle (_openTags mhm) (_style mhm) id
@@ -71,19 +71,23 @@ _buildHtml mhm = case _toRead mhm of
             else mhm'
         | _opening t -> 
             over openTags (t:) 
-            . (if not (null $ _currentText mhm)
-                then endings t
+            . over out ([]:)
+            . (if not . null . _currentText $ mhm
+                then killText . putText (reverse $ _currentText mhm)
                 else id)
             $ mhm'
         | not $ _opening t -> 
             over openTags (drop 1) 
             . endings (_openTags mhm' !! 0)
+            . killText
+            . putText (reverse $ _currentText mhm')
             $ mhm'
         | otherwise -> mhm')
         where
-            appendWidget mhm = case makeWidget mhm $ Just $ reverse $ _currentText mhm of
-                Nothing -> mhm
-                (Just w) -> over out (++w) $ killText mhm
+            appendWidget mhm = case makeWidget mhm $ Just $ (_out mhm !! 0) of
+                Nothing -> mhm'
+                (Just w) -> putText w $ killText mhm'
+                where mhm' = over out (drop 1) mhm
             endings t mhm = if _tagName t `elem` ["li", "h1", "h2", "h3", "h4", "h5", "h6", "p", "pre", "div"]
                 then appendHbox $ appendWidget mhm
                 else appendWidget mhm
@@ -93,13 +97,19 @@ _buildHtml mhm = case _toRead mhm of
         else if not (null (_openTags mhm)) && null (["head", "meta", "link", "script", "style", "select"] `L.intersect` map _tagName (_openTags mhm))
             then (over currentText (c:)) . (set lined False)
             else id) mhm'
+
     (e:emittedTokens) -> _buildHtml mhm'
+
     [] -> appendHbox mhm
 
     where 
         (next, mhm') = (_toRead mhm !! 0, over toRead (drop 1) mhm)
 
-        appendHbox mhm = set lined True $ over out (++"\n") $ killText mhm
+        putText text = over out (\ out -> case out of
+            [] -> [text]
+            (current:rest) -> (current ++ text) : rest)
+
+        appendHbox mhm = set lined True $ putText "\n" $ killText mhm
         killText = set currentText ""
 
 killWhitespace mhm = _killWhitespace $ (if not $ _lined mhm
@@ -140,7 +150,7 @@ parseDecleretiens ds out = case ds of
         (DeclarationValue (Declaration n vs _)) -> case n of
             "position" -> case vs of
                 [(PreservedValue (IdentToken "absolute"))] -> (\ _ -> Nothing) . out
-                _ -> (\ _ -> Nothing) . out
+                _ -> out
             "color" -> setColor vs Mortar.surroundForegroundColor
             "background" -> setColor vs Mortar.surroundBackgroundColor
             "font-weight" -> case vs of
@@ -196,6 +206,7 @@ countCSSTree out tree = case subForest tree of
     [] -> 1
     _ -> foldr ((+) . (countCSSTree 0)) out (subForest tree)
 
-parseWebpage emittedTokens css = _out $ _buildHtml $ builderData emittedTokens $ buildCSSTree css
+parseWebpage :: [Token] -> [ComponentValue] -> String
+parseWebpage emittedTokens css = (!! 0) $ _out $ _buildHtml $ builderData emittedTokens $ buildCSSTree css
 
 drawCSSTree css = drawTree $ fmap (show . fst) $ buildCSSTree css

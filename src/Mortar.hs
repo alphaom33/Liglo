@@ -54,12 +54,13 @@ clearScreen = do
 setForegroundColor r g b = getEscapeSequence $ "38;2;" ++ show r ++ ";" ++ show g ++ ";" ++ show b ++ "m"
 setBackgroundColor r g b = getEscapeSequence $ "48;2;" ++ show r ++ ";" ++ show g ++ ";" ++ show b ++ "m"
 
-surroundForegroundColor r g b s = setForegroundColor r g b ++ s ++ setForegroundColor 255 255 255
+surroundForegroundColor r g b s = setForegroundColor r g b ++ s ++ resetForeground
 surroundBackgroundColor r g b s = setBackgroundColor r g b ++ s ++ resetBackground
 
 surroundBold s = bold ++ s ++ getResetAttrs
 surroundItalic s = italic ++ s ++ getResetAttrs
 
+resetForeground = getEscapeSequence "39m"
 resetBackground = getEscapeSequence "49m"
 
 bold = getEscapeSequence "1m"
