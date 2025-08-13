@@ -47,7 +47,7 @@ applyStyle (tag:tags) (Node (selector, value) children) attribute = case selecto
     (TagSelector n) -> checkStyleApply n (_tagName tag) attribute
     (HashSelector n) -> checkStyleApply n (maybe "" (\ (Attribute (_, v)) -> v) $ getAttr tag "id") attribute
     (ClassSelector n) ->
-        let classes = splitOn " " $ maybe "" (\ (Attribute (_, v)) -> v) $ getAttr tag "style"
+        let classes = splitOn " " $ maybe "" (\ (Attribute (_, v)) -> v) $ getAttr tag "class"
         in foldr (checkStyleApply n) attribute classes
     (StateSelector _ _) -> attribute
     where
@@ -123,9 +123,12 @@ parseColor :: [ComponentValue] -> (Int, Int, Int)
 parseColor v = case v of
     [PreservedValue (HashToken (_, n))] -> 
         let 
-            r = read $ "0x" ++ take 2 n
-            g = read $ "0x" ++ take 2 (drop 2 n)
-            b = read $ "0x" ++ drop 4 n
+            enned = if length n == 3
+                then foldr (\ en ens -> en : en : ens) [] n
+                else n
+            r = read $ "0x" ++ take 2 enned
+            g = read $ "0x" ++ take 2 (drop 2 enned)
+            b = read $ "0x" ++ drop 4 enned
         in (r, g, b)
     [PreservedValue (IdentToken n)] -> case n of
         "white" -> (255, 255, 255)
