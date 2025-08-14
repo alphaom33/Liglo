@@ -1,5 +1,6 @@
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE TupleSections #-}
+{-# LANGUAGE MultilineStrings #-}
 
 module CSSTokenizer where
 
@@ -332,32 +333,43 @@ eatByStart (Parser check) (Parser consumer) = Parser $ \ stream -> case check st
 postProcess :: [CSSToken] -> [CSSToken]
 postProcess out = filter (not . (`elem` [WhitespaceToken, NothingToken])) $ out ++ [EOFToken]
 
-parseString :: String -> (String, Either Error [CSSToken])
-parseString str =
-    let preProcessed = preProcess str
-    in  parse (postProcess <$> manyParser (
-                consumeComment
-                <|> consumeWhitespace
-                <|> consumeString '"'
-                <|> consumeHash
-                <|> consumeString '\''
-                <|> consumeCharacter OpeningParenthesisToken '('
-                <|> consumeCharacter ClosingParenthesisToken ')'
-                <|> consumeNumeric
-                <|> consumeCharacter CommaToken ','
-                <|> consume matchString CDCToken "->"
-                <|> consumeCharacter ColonToken ':'
-                <|> consumeCharacter SemicolonToken ';'
-                <|> consume matchString CDOToken "<!--"
-                <|> AtKeywordToken <$> eatByStart ((:) <$> matchChar '@' <*> checkWouldStartIdentSequence) consumeIdentSequence
-                <|> eatByStart matchEscape consumeIdentLike
-                <|> consumeCharacter OpeningSquareBracketToken '['
-                <|> consumeCharacter ClosingSquareBracketToken ']'
-                <|> consumeCharacter OpeningCurlyBracketToken '{'
-                <|> consumeCharacter ClosingCurlyBracketToken '}'
-                <|> eatByStart matchIdentStart consumeIdentLike
-                <|> Parser (\case
-                    [] -> ("", Left "end of stream")
-                    (c:str) -> (str, Right $ DelimToken c))
-            )) preProcessed
+basics = """
+b {
+    font-weight: bold;
+}
 
+tt {
+    font-style: italic;
+}
+"""
+
+parseString :: String -> (String, Either Error [CSSToken])
+parseString initialStr = go $ basics ++ initialStr
+    where 
+        go str = 
+            let preProcessed = preProcess str
+            in  parse (postProcess <$> manyParser (
+                        consumeComment
+                        <|> consumeWhitespace
+                        <|> consumeString '"'
+                        <|> consumeHash
+                        <|> consumeString '\''
+                        <|> consumeCharacter OpeningParenthesisToken '('
+                        <|> consumeCharacter ClosingParenthesisToken ')'
+                        <|> consumeNumeric
+                        <|> consumeCharacter CommaToken ','
+                        <|> consume matchString CDCToken "->"
+                        <|> consumeCharacter ColonToken ':'
+                        <|> consumeCharacter SemicolonToken ';'
+                        <|> consume matchString CDOToken "<!--"
+                        <|> AtKeywordToken <$> eatByStart ((:) <$> matchChar '@' <*> checkWouldStartIdentSequence) consumeIdentSequence
+                        <|> eatByStart matchEscape consumeIdentLike
+                        <|> consumeCharacter OpeningSquareBracketToken '['
+                        <|> consumeCharacter ClosingSquareBracketToken ']'
+                        <|> consumeCharacter OpeningCurlyBracketToken '{'
+                        <|> consumeCharacter ClosingCurlyBracketToken '}'
+                        <|> eatByStart matchIdentStart consumeIdentLike
+                        <|> Parser (\case
+                            [] -> ("", Left "end of stream")
+                            (c:str) -> (str, Right $ DelimToken c))
+                    )) preProcessed

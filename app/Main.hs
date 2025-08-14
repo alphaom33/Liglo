@@ -15,7 +15,6 @@ import Data.Maybe (fromJust)
 import Brick.Focus (focusRingCursor)
 import Brick.Forms (Form(formFocus, formState), handleFormEvent)
 import Lens.Micro.Extras (view)
-import Control.Monad (join)
 import Data.Text (Text)
 import qualified Brick.BChan as B
 import Graphics.Vty.CrossPlatform (mkVty)
