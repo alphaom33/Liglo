@@ -177,6 +177,7 @@ blamCSS collapsed css = case css of
                 then ((StarSelector, snd $ head maybeStar), maybeStarless)
                 else ((StarSelector, []), collapsed)
     (SimpleBlockValue (SimpleCurlyBlock (CurlyBlock ss ds)) : rest) -> blamCSS (map (\ s -> (reverse s, ds)) ss ++ collapsed) rest
+    (_:rest) -> blamCSS collapsed rest
 
 _buildCSSTree :: (PreSelectorNode, [SelectorNode]) -> ((Selector, CSSAttribute), [(PreSelectorNode, [SelectorNode])])
 _buildCSSTree ((selector, val), css) =

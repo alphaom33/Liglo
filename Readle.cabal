@@ -68,6 +68,7 @@ executable Readle
         bytestring >= 0.11.5.2,
         containers >= 0.7,
         split >= 0.2.5,
+        haskell-debug-adapter >= 0.0.42.0,
         Readle-lib
     ghc-options: -Wno-x-partial
     hs-source-dirs: app

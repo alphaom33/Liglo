@@ -81,9 +81,9 @@ try (Parser f) = Parser $ \ stream -> case f stream of
 satisfy :: (Char -> Bool) -> Parser Char
 satisfy f = Parser $ \case
     [] -> ("", Left "end of stream")
-    (c:cs)
-        | f c -> (cs, Right c)
-        | otherwise -> (cs, Left "did not satisfy")
+    (c:cs) -> if f c
+        then (cs, Right c)
+        else (cs, Left "did not satisfy")
 
 pluralate :: Applicative f => f a -> f [a]
 pluralate p = (:) <$> p <*> pure []
@@ -108,6 +108,7 @@ consumeComment :: Parser CSSToken
 consumeComment = dropAll <$> matchString "/*" <*> manyParser (matchNotString "*/") <*> matchString "*/"
     where dropAll _ _ _ = NothingToken
 
+preProcess :: String -> String
 preProcess str = map (\ c -> case c of -- also replace surrogates somehow
     '\r' -> '\n'
     '\f' -> '\n'
@@ -192,7 +193,7 @@ characterEscape :: Parser Char
 characterEscape = dropFirst <$>
     matchChar '\\'
     <*> (matchChar '\n'
-        <|> tracer . readIt <$> someParser matchHex
+        <|> readIt <$> someParser matchHex
         <|> satisfy (const True))
     where
         dropFirst _ a = a
@@ -333,6 +334,7 @@ eatByStart (Parser check) (Parser consumer) = Parser $ \ stream -> case check st
 postProcess :: [CSSToken] -> [CSSToken]
 postProcess out = filter (not . (`elem` [WhitespaceToken, NothingToken])) $ out ++ [EOFToken]
 
+basics :: String
 basics = """
 b {
     font-weight: bold;
@@ -344,32 +346,31 @@ tt {
 """
 
 parseString :: String -> (String, Either Error [CSSToken])
-parseString initialStr = go $ basics ++ initialStr
-    where 
-        go str = 
-            let preProcessed = preProcess str
-            in  parse (postProcess <$> manyParser (
-                        consumeComment
-                        <|> consumeWhitespace
-                        <|> consumeString '"'
-                        <|> consumeHash
-                        <|> consumeString '\''
-                        <|> consumeCharacter OpeningParenthesisToken '('
-                        <|> consumeCharacter ClosingParenthesisToken ')'
-                        <|> consumeNumeric
-                        <|> consumeCharacter CommaToken ','
-                        <|> consume matchString CDCToken "->"
-                        <|> consumeCharacter ColonToken ':'
-                        <|> consumeCharacter SemicolonToken ';'
-                        <|> consume matchString CDOToken "<!--"
-                        <|> AtKeywordToken <$> eatByStart ((:) <$> matchChar '@' <*> checkWouldStartIdentSequence) consumeIdentSequence
-                        <|> eatByStart matchEscape consumeIdentLike
-                        <|> consumeCharacter OpeningSquareBracketToken '['
-                        <|> consumeCharacter ClosingSquareBracketToken ']'
-                        <|> consumeCharacter OpeningCurlyBracketToken '{'
-                        <|> consumeCharacter ClosingCurlyBracketToken '}'
-                        <|> eatByStart matchIdentStart consumeIdentLike
-                        <|> Parser (\case
-                            [] -> ("", Left "end of stream")
-                            (c:str) -> (str, Right $ DelimToken c))
-                    )) preProcessed
+parseString str = 
+    let preProcessed = basics ++ preProcess str
+    in parse (postProcess <$> manyParser (
+                consumeComment
+                <|> consumeWhitespace
+                <|> consumeString '"'
+                <|> consumeHash
+                <|> consumeString '\''
+                <|> consumeCharacter OpeningParenthesisToken '('
+                <|> consumeCharacter ClosingParenthesisToken ')'
+                <|> consumeNumeric
+                <|> consumeCharacter CommaToken ','
+                <|> consume matchString CDCToken "->"
+                <|> consumeCharacter ColonToken ':'
+                <|> consumeCharacter SemicolonToken ';'
+                <|> consume matchString CDOToken "<!--"
+                <|> AtKeywordToken <$> eatByStart ((:) <$> matchChar '@' <*> checkWouldStartIdentSequence) ((:) <$> matchChar '@' <*> consumeIdentSequence)
+                <|> eatByStart matchEscape consumeIdentLike
+                <|> consumeCharacter OpeningSquareBracketToken '['
+                <|> consumeCharacter ClosingSquareBracketToken ']'
+                <|> consumeCharacter OpeningCurlyBracketToken '{'
+                <|> consumeCharacter ClosingCurlyBracketToken '}'
+                <|> eatByStart matchIdentStart consumeIdentLike
+                <|> Parser (\case
+                    [] -> ("", Left "end of stream")
+                    (c:str) -> (str, Right $ DelimToken c))
+            )) preProcessed
+
