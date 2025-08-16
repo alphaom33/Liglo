@@ -69,14 +69,24 @@ _buildHtml mhm = case _toRead mhm of
                 then killText . putText (reverse $ _currentText mhm)
                 else id)
             $ mhm'
-        | not $ _opening t -> 
-            over openTags (drop 1) 
-            . endings (head $ _openTags mhm')
-            . killText
-            . putText (reverse $ _currentText mhm')
-            $ mhm'
+        | not $ _opening t -> killExtras mhm'
         | otherwise -> mhm')
         where
+            killExtras mhm''
+                | null $ _openTags mhm'' = mhm''
+                | head (_openTags mhm'') /= t = 
+                    killExtras
+                    . doEnd
+                    $ mhm''
+                | otherwise = doEnd mhm''
+
+            doEnd mhm'' =
+                over openTags (drop 1) 
+                . endings (head $ _openTags mhm'')
+                . killText
+                . putText (reverse $ _currentText mhm'')
+                $ mhm''
+
             appendWidget state = case makeWidget state $ Just $ head $ _out state of
                 Nothing -> state'
                 (Just w) -> putText w $ killText state'

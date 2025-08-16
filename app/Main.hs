@@ -59,20 +59,22 @@ nomUrl url = do
     pure $ unpack $ getResponseBody b
 
 main = do
-    args <- getArgs
-    let arged = map (\ c -> if c == ' ' then '+' else c) $ concat args
-    key <- lookupEnv "GOOGLE_API_KEY"
-    let apiKey = fromJust key
-    finalState <- defaultMain S.app $ S.initialState apiKey $ head args
-
-    when (S._curQuery finalState == head args) (do
-        print "exited forcefully"
-        exitSuccess)
-
-    a <- parseRequest $ S._curQuery finalState
-    b <- httpLBS a
-    let asdf = unpack (getResponseBody b)
+    -- args <- getArgs
+    -- let arged = map (\ c -> if c == ' ' then '+' else c) $ concat args
+    -- key <- lookupEnv "GOOGLE_API_KEY"
+    -- let apiKey = fromJust key
+    -- finalState <- defaultMain S.app $ S.initialState apiKey $ head args
+    --
+    -- when (S._curQuery finalState == head args) (do
+    --     print "exited forcefully"
+    --     exitSuccess)
+    --
+    -- a <- parseRequest $ S._curQuery finalState
+    -- b <- httpLBS a
+    -- let asdf = unpack (getResponseBody b)
+    asdf <- readFile "asdf.html"
     let result = parseString asdf
+    -- writeFile "asdf.html" asdf
 
     let styleLinks = linkStyleTags $ grabStylesheets $ _emitted result
     str <- foldr (\ a b -> (++) <$> nomUrl ("https://hoogle.haskell.org" ++ '/':a) <*> b) (pure []) styleLinks
