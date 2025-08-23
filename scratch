@@ -1,3 +1,0 @@
-out is now (String, CSSAttribute)
-applyStyle is called on openTag, with fst going into currentText and snd getting stored in a stack like opentags
-snd gets called on currentText then added for ending
