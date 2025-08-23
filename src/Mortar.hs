@@ -71,6 +71,10 @@ surroundBold :: [Char] -> [Char]
 surroundBold s = bold ++ s ++ resetBold
 surroundItalic :: [Char] -> [Char]
 surroundItalic s = italic ++ s ++ resetItalic
+surroundUnderline :: [Char] -> [Char]
+surroundUnderline s = underline ++ s ++ resetUnderline
+surroundStrikethrough :: [Char] -> [Char]
+surroundStrikethrough s = strikethrough ++ s ++ resetStrikethrough
 
 resetForeground :: [Char]
 resetForeground = getEscapeSequence "39m"
@@ -90,6 +94,10 @@ resetBold :: [Char]
 resetBold = getEscapeSequence "22m"
 resetItalic :: [Char]
 resetItalic = getEscapeSequence "23m"
+resetUnderline :: [Char]
+resetUnderline = getEscapeSequence "24m"
+resetStrikethrough :: [Char]
+resetStrikethrough = getEscapeSequence "29m"
 
 resetAttrs :: IO ()
 resetAttrs = putEscapeSequence "0m"

@@ -1,3 +1,5 @@
+{-# LANGUAGE TypeSynonymInstances #-}
+{-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE MultiWayIf #-}
@@ -6,18 +8,27 @@
 module HTMLBuilder where
 
 import qualified Data.List as L
+import qualified Data.Map as M
 import Data.List.Split
 import Data.Tree
+
+import Debug.Trace
 
 import Lens.Micro.TH (makeLenses)
 import Lens.Micro (set, over)
 
-import HTMLParser (Token(..), Tag, Attribute(..), _selfClosing, _opening, _tagName, tracer, _attrs)
+import HTMLParser (Token(..), Tag, Attribute(..), _selfClosing, _opening, _tagName, tracer, _attrs, opening)
 import CSSParser
 import CSSTokenizer
 import qualified Mortar
 
+import CharacterReferences
+
 type CSSAttribute = Maybe String -> Maybe String
+instance Show CSSAttribute where
+    show _ = "<attr>"
+
+
 type PreSelectorNode = (Selector, [ComponentValue])
 type SelectorNode = ([Selector], [ComponentValue])
 
@@ -28,7 +39,7 @@ data BuilderData = BuilderData {
     , _currentText :: String
     , _style :: Tree (Selector, CSSAttribute)
     , _lined :: Bool
-}
+} deriving Show
 $(makeLenses ''BuilderData)
 
 builderData :: [Token] -> Tree (Selector, CSSAttribute) -> BuilderData
@@ -59,22 +70,24 @@ _buildHtml :: BuilderData -> BuilderData
 
 _buildHtml mhm = case _toRead mhm of
     (TagToken t:_) -> _buildHtml (if -- ...what
-        | _selfClosing t -> if _tagName t == "br"
-            then appendHbox mhm'
-            else mhm'
-        | _opening t -> 
-            over openTags (t:) 
+        | _selfClosing t -> (if _tagName t == "br"
+            then appendHbox
+            else id) $ checkSet mhm'
+        | _opening t ->
+            over openTags (t:)
             . over out ([]:)
-            . (if not . null . _currentText $ mhm
-                then killText . putText (reverse $ _currentText mhm)
-                else id)
+            . checkSet
             $ mhm'
         | not $ _opening t -> killExtras mhm'
         | otherwise -> mhm')
         where
+            checkSet = if not . null . _currentText $ mhm
+                then killText . putText (reverse $ _currentText mhm)
+                else id
+
             killExtras mhm''
                 | null $ _openTags mhm'' = mhm''
-                | head (_openTags mhm'') /= t = 
+                | (_tagName . head . _openTags $ mhm') /= _tagName t =
                     killExtras
                     . doEnd
                     $ mhm''
@@ -116,14 +129,14 @@ _buildHtml mhm = case _toRead mhm of
         killText = set currentText ""
 
 killWhitespace :: BuilderData -> BuilderData
-killWhitespace mhm = _killWhitespace $ (if not $ _lined mhm
-    then over currentText (' ' :)
-    else id) mhm
+killWhitespace mhm = _killWhitespace $ (if _lined mhm
+    then id
+    else over currentText (' ' :)) mhm
 
 _killWhitespace :: BuilderData -> BuilderData
 _killWhitespace mhm = case next of
     (Character c) -> if c `elem` " \n\t"
-        then killWhitespace mhm'
+        then _killWhitespace mhm'
         else mhm
     _ -> mhm
     where (next, mhm') = (head $ _toRead mhm, over toRead (drop 1) mhm)
@@ -140,9 +153,7 @@ parseColor v = case v of
             g = read $ "0x" ++ take 2 (drop 2 enned)
             b = read $ "0x" ++ drop 4 enned
         in (r, g, b)
-    [PreservedValue (IdentToken n)] -> case n of
-        "white" -> (255, 255, 255)
-        "black" -> (0, 0, 0)
+    [PreservedValue (IdentToken n)] -> colorNameToColor M.! n
 
 selectorToString :: Selector -> String
 selectorToString selector = case selector of
@@ -156,10 +167,10 @@ parseDecleretiens :: [ComponentValue] -> CSSAttribute -> CSSAttribute
 parseDecleretiens ds out = case ds of
     [] -> out
     (nextDeclaration : rest) -> parseDecleretiens rest $ case nextDeclaration of
-        (DeclarationValue (Declaration n vs _)) -> case n of
+        (DeclarationValue (Declaration n vs _)) -> out . case n of
             "position" -> case vs of
-                [PreservedValue (IdentToken "absolute")] -> const Nothing . out
-                _ -> out
+                [PreservedValue (IdentToken "absolute")] -> const Nothing
+                _ -> id
             "color" -> setColor vs Mortar.surroundForegroundColor
             "background" -> setColor vs Mortar.surroundBackgroundColor
             "font-weight" -> case vs of
@@ -167,11 +178,15 @@ parseDecleretiens ds out = case ds of
             "font-style" -> case vs of
                 [PreservedValue (IdentToken "italic")] -> fmap Mortar.surroundItalic
                 [PreservedValue (IdentToken "normal")] -> fmap (Mortar.resetItalic++)
+            "text-decoration" -> case vs of
+                [PreservedValue (IdentToken "underline")] -> fmap Mortar.surroundUnderline
+                [PreservedValue (IdentToken "line-through")] -> fmap Mortar.surroundStrikethrough
+                [PreservedValue (IdentToken "none")] -> fmap (Mortar.getResetAttrs++)
             _ -> out
     where
         setColor vs func = 
             let (r, g, b) = parseColor vs
-            in out . fmap (func r g b)
+            in fmap (func r g b)
 
 buildCSSTree :: [ComponentValue] -> Tree (Selector, CSSAttribute)
 buildCSSTree css = unfoldTree _buildCSSTree (blamCSS [] css)

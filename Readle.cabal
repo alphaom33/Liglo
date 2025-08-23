@@ -70,7 +70,7 @@ executable Readle
         split >= 0.2.5,
         haskell-debug-adapter >= 0.0.42.0,
         Readle-lib
-    ghc-options: -Wno-x-partial
+    ghc-options: -threaded -Wno-x-partial -prof -fprof-auto -rtsopts
     hs-source-dirs: app
     default-language: Haskell2010
 

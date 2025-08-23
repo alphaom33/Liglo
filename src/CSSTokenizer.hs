@@ -343,6 +343,12 @@ b {
 tt {
     font-style: italic;
 }
+
+a {
+    color: blue;
+    text-decoration: underline;
+}
+
 """
 
 parseString :: String -> (String, Either Error [CSSToken])

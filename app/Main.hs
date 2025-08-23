@@ -58,6 +58,20 @@ nomUrl url = do
     b <- httpLBS a
     pure $ unpack $ getResponseBody b
 
+takeStyles :: String -> [Token] -> String
+takeStyles out [] = out
+takeStyles out (next:rest) = case next of
+    (TagToken t) -> if _opening t && _tagName t == "style"
+        then let (out', rest') = takeChars "" rest in takeStyles (out ++ out') rest'
+        else takeStyles out rest
+    _ -> takeStyles out rest
+
+takeChars out (next:rest) = case next of
+    (Character c) -> takeChars (c : out) rest
+    (TagToken t) -> if not (_opening t) && _tagName t == "style"
+        then (reverse out, rest)
+        else takeChars out rest
+
 main = do
     -- args <- getArgs
     -- let arged = map (\ c -> if c == ' ' then '+' else c) $ concat args
@@ -68,19 +82,27 @@ main = do
     -- when (S._curQuery finalState == head args) (do
     --     print "exited forcefully"
     --     exitSuccess)
-    --
-    -- a <- parseRequest $ S._curQuery finalState
+
+    let finalURL = "https://hoogle.haskell.org" --S._curQuery finalState
+
+    -- a <- parseRequest finalURL
     -- b <- httpLBS a
     -- let asdf = unpack (getResponseBody b)
     asdf <- readFile "asdf.html"
-    let result = parseString asdf
     -- writeFile "asdf.html" asdf
+    let result = _emitted $ parseString asdf
 
-    let styleLinks = linkStyleTags $ grabStylesheets $ _emitted result
-    str <- foldr (\ a b -> (++) <$> nomUrl ("https://hoogle.haskell.org" ++ '/':a) <*> b) (pure []) styleLinks
+    -- let styleLinks = linkStyleTags $ grabStylesheets $ _emitted result
+    -- yankedStyles <- foldr (\ a b -> (++) <$> nomUrl (finalURL ++ '/':a) <*> b) (pure []) styleLinks
+    --
+    -- let styleInlines = takeStyles "" $ _emitted result
+    --
+    -- let str = yankedStyles ++ styleInlines
+    -- writeFile "asdf.css" str
+    str <- readFile "asdf.css"
+
     let out = CT.parseString str
     let outer = CP.parseList $ fromRight [] $ snd out
-    let outest = H.parseWebpage (_emitted result) outer
+    let outest = H.parseWebpage result outer
 
     Mortar.appIt outest Mortar.initialState
-
