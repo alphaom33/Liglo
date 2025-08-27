@@ -24,6 +24,7 @@ library Readle-lib
         Item
         CharacterReferences
         Mortar
+        StyleStealer
     hs-source-dirs: src
     build-depends:
         base >=4.14,
@@ -78,6 +79,7 @@ test-suite tests
     type: exitcode-stdio-1.0
     main-is: Main.hs
     other-modules:
+        CSSParserTest
         CSSTokenizerTest
         HTMLParserTest
     build-depends:

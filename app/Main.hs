@@ -1,5 +1,4 @@
 {-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE LambdaCase #-}
 module Main where
 
 import qualified SearchApp
@@ -36,41 +35,7 @@ import qualified CSSTokenizer as CT
 import qualified CSSParser as CP
 
 import Mortar
-
-getAttr t name = filter (\ (Attribute (n, _)) -> n == name) (_attrs t) L.!? 0
-
-grabStylesheets :: [Token] -> [Token]
-grabStylesheets = filter (\case
-    (TagToken t) -> checkAttr t "rel" "stylesheet" && checkAttr t "type" "text/css"
-    _ -> False)
-    where
-        checkAttr t attrName str = case getAttr t attrName of
-            Nothing -> False
-            (Just (Attribute (_, v))) -> v == str
-
-linkStyleTags = map $ \case
-    (TagToken t) -> case getAttr t "href" of
-        (Just (Attribute (_, v))) -> v
-
-nomUrl :: String -> IO String
-nomUrl url = do
-    a <- parseRequest url
-    b <- httpLBS a
-    pure $ unpack $ getResponseBody b
-
-takeStyles :: String -> [Token] -> String
-takeStyles out [] = out
-takeStyles out (next:rest) = case next of
-    (TagToken t) -> if _opening t && _tagName t == "style"
-        then let (out', rest') = takeChars "" rest in takeStyles (out ++ out') rest'
-        else takeStyles out rest
-    _ -> takeStyles out rest
-
-takeChars out (next:rest) = case next of
-    (Character c) -> takeChars (c : out) rest
-    (TagToken t) -> if not (_opening t) && _tagName t == "style"
-        then (reverse out, rest)
-        else takeChars out rest
+import StyleStealer
 
 main = do
     -- args <- getArgs
@@ -83,20 +48,21 @@ main = do
     --     print "exited forcefully"
     --     exitSuccess)
 
-    let finalURL = "https://hoogle.haskell.org" --S._curQuery finalState
+    -- let finalURL = S._curQuery finalState
+    -- writeFile "asdf.url" finalURL
 
     -- a <- parseRequest finalURL
     -- b <- httpLBS a
     -- let asdf = unpack (getResponseBody b)
-    asdf <- readFile "asdf.html"
     -- writeFile "asdf.html" asdf
+    asdf <- readFile "asdf.html"
     let result = _emitted $ parseString asdf
 
-    -- let styleLinks = linkStyleTags $ grabStylesheets $ _emitted result
-    -- yankedStyles <- foldr (\ a b -> (++) <$> nomUrl (finalURL ++ '/':a) <*> b) (pure []) styleLinks
-    --
-    -- let styleInlines = takeStyles "" $ _emitted result
-    --
+    -- let styleLinks = linkStyleTags $ grabStylesheets result
+    -- yankedStyles <- foldr (\ a b -> (++) <$> nomUrl finalURL a <*> b) (pure []) styleLinks
+
+    -- let styleInlines = takeStyles "" result
+
     -- let str = yankedStyles ++ styleInlines
     -- writeFile "asdf.css" str
     str <- readFile "asdf.css"
@@ -105,4 +71,7 @@ main = do
     let outer = CP.parseList $ fromRight [] $ snd out
     let outest = H.parseWebpage result outer
 
-    Mortar.appIt outest Mortar.initialState
+    print outest
+    -- putStr $ H.drawCSSTree outer
+    -- Mortar.appIt outest Mortar.initialState
+

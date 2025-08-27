@@ -1,9 +1,22 @@
+{-# OPTIONS_GHC -Wno-incomplete-patterns #-}
+{-# OPTIONS_GHC -Wno-incomplete-uni-patterns #-}
+{-# LANGUAGE FlexibleInstances #-}
 module CSSParser where
 
 import CSSTokenizer
 import HTMLParser (tracer)
+import Debug.Trace
+
+import Data.List.Split
 
 import Data.Map ((!), fromList)
+
+type AttrNess = (String -> Bool)
+instance Show AttrNess where
+    show _ = "<attr>"
+instance Eq AttrNess where
+    (==) _ _ = True
+    
 
 data Selector =
     TagSelector String
@@ -11,6 +24,8 @@ data Selector =
     | ClassSelector String
     | StateSelector String String
     | StarSelector
+    | AttrSelector String AttrNess
+    | SelectorGroup [Selector]
     deriving (Show, Eq)
 
 data CurlyBlock = CurlyBlock [[Selector]] [ComponentValue] deriving (Show, Eq)
@@ -22,7 +37,7 @@ data SimpleBlock =
     | SimpleSquareBlock SquareBlock
     | SimpleParenthesisBlock ParenthesisBlock
     deriving (Show, Eq)
- 
+
 data Declaration = Declaration {
         declarationName :: String
         , declarationValue :: [ComponentValue]
@@ -38,7 +53,7 @@ data ComponentValue =
     | SelectorValue Selector
     deriving (Show, Eq)
 
-data Rule = 
+data Rule =
     AtRule {
         atName :: String
         , atPrelude :: [ComponentValue]
@@ -55,23 +70,25 @@ parseList :: [CSSToken] -> [ComponentValue]
 parseList list = reverse $ _parseList [] list
 
 consumeFunction :: [CSSToken] -> (ComponentValue, [CSSToken])
-consumeFunction s = go [] state
+consumeFunction ((FunctionToken name):s) = go [] s
     where
         go :: [ComponentValue] -> [CSSToken] -> (ComponentValue, [CSSToken])
         go out state = if nextInputToken `elem` [ClosingParenthesisToken, EOFToken]
-            then (FunctionValue (name, out), state)
-            else let (val, state'') = consumeComponentValue state in go (val:out) state''
+            then (FunctionValue (name, reverse out), state')
+            else let (val, state'') = consumeFuncValue state in go (val:out) state''
             where
                 (nextInputToken:state') = state
 
-        ((FunctionToken name):state) = s
+        consumeFuncValue (nextInputToken:state) = case nextInputToken of
+            (FunctionToken f) -> consumeFunction (FunctionToken f : state)
+            _ -> (PreservedValue nextInputToken, state)
 
 consumeComponentValue :: [CSSToken] -> (ComponentValue, [CSSToken])
-consumeComponentValue state = go [] state
+consumeComponentValue = go []
     where
         go tokens state = case nextInputToken of
             OpeningCurlyBracketToken -> consumeSimpleBlock (reverse tokens) state
-            OpeningSquareBracketToken -> consumeSimpleBlock (reverse tokens) state
+            -- OpeningSquareBracketToken -> consumeSimpleBlock (reverse tokens) state
             OpeningParenthesisToken -> consumeSimpleBlock (reverse tokens) state
             (FunctionToken _) -> consumeFunction state
             _ -> if nextnextInputToken == EOFToken
@@ -81,18 +98,41 @@ consumeComponentValue state = go [] state
                 (nextInputToken:state') = state
                 (nextnextInputToken:_) = state'
 
+killrest :: [CSSToken] -> [CSSToken]
+killrest = go 1
+    where 
+        go :: Integer -> [CSSToken] -> [CSSToken]
+        go count (next:state)
+            | next == OpeningCurlyBracketToken = go (count + 1) state
+            | next == ClosingCurlyBracketToken = if count == 0
+                then state
+                else go (count - 1) state
+            | otherwise = go count state
+
+matchStar :: Eq a => [a] -> [a] -> Bool
+matchStar s v = go v (length v - length s)
+    where 
+        go v num
+            | num < 0 = False
+            | s == take (length s) v = True
+            | otherwise = go (drop 1 v) (num - 1)
+
+matchspaced :: [Char] -> [Char] -> Bool
+matchspaced s = elem s . splitOn " "
+
 consumeSimpleBlock :: [ComponentValue] -> [CSSToken] -> (ComponentValue, [CSSToken])
-consumeSimpleBlock tokens s = 
-    let (val, state') = go [] state
+consumeSimpleBlock tokens (startingToken:s) =
+    let (val, state') = go [] s
     in (SimpleBlockValue $ (startToConstructor ! startingToken) $ reverse val, state')
     where
         go :: [CSSToken] -> [CSSToken] -> ([ComponentValue], [CSSToken])
-        go out state = if nextInputToken `elem` [endingToken, EOFToken]
-            then (fst $ consumeListOfDeclarations (reverse $ EOFToken : out), state')
-            else go (nextInputToken:out) state'
+        go out state
+            | nextInputToken `elem` [endingToken, EOFToken] = (fst $ consumeListOfDeclarations (reverse $ EOFToken : out), state')
+            | nextInputToken == startingToken && startingToken == OpeningCurlyBracketToken = ([], killrest state')
+            | otherwise = go (nextInputToken:out) state'
             where (nextInputToken:state') = state
 
-        endingToken = startToEnd ! startingToken 
+        endingToken = startToEnd ! startingToken
 
         startToEnd = fromList [
             (OpeningCurlyBracketToken, ClosingCurlyBracketToken)
@@ -105,21 +145,46 @@ consumeSimpleBlock tokens s =
             [] -> reverse $ if null currentList
                 then out
                 else addCurrentList
+
             ((PreservedValue (DelimToken '*')) : rest) -> parseTokenList out (StarSelector : currentList) rest
-            ((PreservedValue locator) : (PreservedValue ColonToken) : (PreservedValue pseudoClass) : rest) -> 
+
+            ((PreservedValue ColonToken) : (PreservedValue ColonToken) : (PreservedValue _) : rest) ->
+                parseTokenList out currentList rest -- TODO do this
+
+            ((PreservedValue locator) : (PreservedValue ColonToken) : (PreservedValue pseudoClass) : rest) ->
                 parseTokenList out (StateSelector (grabStr locator) (grabStr pseudoClass) : currentList) rest
-                where 
+                where
                     grabStr token = case token of
-                        (IdentToken s) -> s
-                        (HashToken (_, s)) -> s
+                        (IdentToken s') -> s'
+                        (HashToken (_, s')) -> s'
+
+            (PreservedValue (DelimToken '>') : PreservedValue child : rest) ->
+                parseTokenList out (tokenToSelector child : currentList) rest
+
+            (PreservedValue (IdentToken tagName) : PreservedValue OpeningSquareBracketToken : PreservedValue (IdentToken attr) : rest) -> case rest of
+                (PreservedValue ClosingSquareBracketToken : rest') -> getAttrSelector (/= "") rest'
+                (PreservedValue (DelimToken '=') : PreservedValue (StringToken against) : PreservedValue ClosingSquareBracketToken : rest') -> getAttrSelector (== against) rest'
+                (PreservedValue (DelimToken '~') : PreservedValue (DelimToken '=') : PreservedValue (StringToken against) : PreservedValue ClosingSquareBracketToken : rest') -> getAttrSelector (matchspaced against) rest'
+                (PreservedValue (DelimToken '|') : PreservedValue (DelimToken '=') : PreservedValue (StringToken against) : PreservedValue ClosingSquareBracketToken : rest') -> getAttrSelector (\ v -> v == against || take (length against + 1) v == against ++ "-") rest'
+                (PreservedValue (DelimToken '^') : PreservedValue (DelimToken '=') : PreservedValue (StringToken against) : PreservedValue ClosingSquareBracketToken : rest') -> getAttrSelector ((== against) . take (length against)) rest'
+                (PreservedValue (DelimToken '$') : PreservedValue (DelimToken '=') : PreservedValue (StringToken against) : PreservedValue ClosingSquareBracketToken : rest') -> getAttrSelector ((== against) . reverse . take (length against) . reverse) rest'
+                (PreservedValue (DelimToken '*') : PreservedValue (DelimToken '=') : PreservedValue (StringToken against) : PreservedValue ClosingSquareBracketToken : rest') -> getAttrSelector (matchStar against) rest'
+                where
+                    getAttrSelector check = parseTokenList out (SelectorGroup [TagSelector tagName, AttrSelector attr check] : currentList)
+
             ((PreservedValue nextToken) : rest) -> case nextToken of
-                (IdentToken n) -> parseTokenList out ((case n of
-                    ('.':n) -> ClassSelector n
-                    _ -> TagSelector n) : currentList) rest
-                (HashToken (_, n)) -> parseTokenList out (HashSelector n : currentList) rest
+                SemicolonToken -> parseTokenList out currentList rest -- TODO actually figure this out
                 CommaToken -> parseTokenList addCurrentList [] rest
+                _ -> parseTokenList out (tokenToSelector nextToken : currentList) rest
+
             where
                 addCurrentList = reverse currentList : out
+
+                tokenToSelector nextToken = case tracer nextToken of
+                    (IdentToken n) -> case n of
+                        ('.':n') -> ClassSelector n'
+                        _ -> TagSelector n
+                    (HashToken (_, n)) -> HashSelector n
 
         startToConstructor = fromList [
             (OpeningCurlyBracketToken, SimpleCurlyBlock . CurlyBlock (parseTokenList [] [] tokens))
@@ -127,15 +192,13 @@ consumeSimpleBlock tokens s =
             , (OpeningParenthesisToken, SimpleParenthesisBlock . ParenthesisBlock)
             ]
 
-        (startingToken:state) = s
-
 consumeQualifiedRule :: [CSSToken] -> (Maybe Rule, [CSSToken])
-consumeQualifiedRule state = go [] state
-    where 
+consumeQualifiedRule = go []
+    where
         go :: [ComponentValue] -> [CSSToken] -> (Maybe Rule, [CSSToken])
         go prelude state = case nextInputToken of
             EOFToken -> (Nothing, state)
-            OpeningCurlyBracketToken -> 
+            OpeningCurlyBracketToken ->
                 let (SimpleBlockValue (SimpleCurlyBlock val), state'') = consumeSimpleBlock [] state
                 in (Just QualifiedRule {qualifiedPrelude=prelude, qualifiedBlock=val}, state'')
             _ -> let (val, state'') = consumeComponentValue state in go (val:prelude) state''
@@ -144,7 +207,7 @@ consumeQualifiedRule state = go [] state
 
 consumeAtRule :: [CSSToken] -> (Rule, [CSSToken])
 consumeAtRule s = go [] state
-    where 
+    where
         go :: [ComponentValue] -> [CSSToken] -> (Rule, [CSSToken])
         go prelude state = case nextInputToken of
             SemicolonToken -> (attish Nothing, state')
@@ -181,7 +244,7 @@ consumeListOfRules topLevelFlag state = go [] state
 consumeDeclaration :: [CSSToken] -> (Maybe Declaration, [CSSToken])
 consumeDeclaration s = if nextInputToken == ColonToken
     then
-        let 
+        let
             (val, state'') = eatVals [] $ eatWhitespace state'
         in case val of
             ((PreservedValue (IdentToken "important")):(PreservedValue (DelimToken '!')):rest) -> (Just $ declar rest True, state'')
@@ -212,7 +275,7 @@ killUnknown state = if nextInputToken `elem` [SemicolonToken, EOFToken]
 
 consumeIdent :: [CSSToken] -> (Maybe Declaration, [CSSToken])
 consumeIdent state = go [] state
-    where 
+    where
         go :: [CSSToken] -> [CSSToken] -> (Maybe Declaration, [CSSToken])
         go tokens state = if nextInputToken `elem` [SemicolonToken, EOFToken]
             then let (val, _) = consumeDeclaration $ reverse (EOFToken:tokens) in case val of
@@ -239,7 +302,7 @@ consumeStyleBlock state = go [] [] state
                 (nextInputToken:state') = state
 
 consumeListOfDeclarations :: [CSSToken] -> ([ComponentValue], [CSSToken])
-consumeListOfDeclarations state = go [] state
+consumeListOfDeclarations = go []
     where
         go :: [ComponentValue] -> [CSSToken] -> ([ComponentValue], [CSSToken])
         go list [] = (list, [EOFToken])

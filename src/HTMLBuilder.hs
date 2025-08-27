@@ -1,4 +1,3 @@
-{-# LANGUAGE TypeSynonymInstances #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE TemplateHaskell #-}
@@ -52,18 +51,33 @@ getAttr :: Tag -> String -> Maybe Attribute
 getAttr t name = filter (\ (Attribute (n, _)) -> n == name) (_attrs t) L.!? 0
 
 applyStyle :: [Tag] -> Tree (Selector, CSSAttribute) -> CSSAttribute -> CSSAttribute
-applyStyle [] _ attribute = attribute
-applyStyle (tag:tags) (Node (selector, value) children) attribute = case selector of
+applyStyle [] _ attribute = trace "a" attribute
+applyStyle (tag:tags) (Node (selector, value) children) attribute = case tracer selector of
     StarSelector -> foldr (applyStyle (tag:tags)) (value . attribute) children
-    (TagSelector n) -> checkStyleApply n (_tagName tag) attribute
-    (HashSelector n) -> checkStyleApply n (maybe "" (\ (Attribute (_, v)) -> v) $ getAttr tag "id") attribute
     (ClassSelector n) ->
-        let classes = splitOn " " $ maybe "" (\ (Attribute (_, v)) -> v) $ getAttr tag "class"
+        let classes = splitOn " " $ getAttrJust "class"
         in foldr (checkStyleApply n) attribute classes
-    (StateSelector _ _) -> attribute
+    _ -> if checkSelector selector
+        then toNext attribute
+        else attribute
     where
+        checkSelector selector = case selector of
+            (TagSelector n) -> n == _tagName tag
+            (HashSelector n) -> n == getAttrJust "id"
+            (ClassSelector n) ->
+                let classes = splitOn " " $ getAttrJust "class"
+                in elem n classes
+            (AttrSelector a c) -> c (getAttrJust a)
+            (StateSelector _ _) -> False
+            (SelectorGroup ss) -> foldr ((&&) . checkSelector) True ss
+
+        toNext currentAttribute = foldr (applyStyle tags) (value . currentAttribute) children 
+
+        getAttrJust = maybe "" getAttrValue . getAttr tag
+        getAttrValue (Attribute (_, v)) = v
+
         checkStyleApply check val currentAttribute = if check == val
-            then foldr (applyStyle tags) (value . currentAttribute) children
+            then toNext currentAttribute
             else attribute
 
 _buildHtml :: BuilderData -> BuilderData
@@ -141,11 +155,16 @@ _killWhitespace mhm = case next of
     _ -> mhm
     where (next, mhm') = (head $ _toRead mhm, over toRead (drop 1) mhm)
 
+parseFuncValue = filter (/= PreservedValue CommaToken)
 
 parseColor :: [ComponentValue] -> (Int, Int, Int)
 parseColor v = case v of
-    [PreservedValue (HashToken (_, n))] -> 
-        let 
+    [FunctionValue ("rgb", comps)] -> case parseFuncValue comps of
+        [PreservedValue (NumberToken r), PreservedValue (NumberToken g), PreservedValue (NumberToken b)] -> (round r, round g, round b)
+    [FunctionValue ("hsl", comps)] -> case parseFuncValue comps of
+        [PreservedValue (NumberToken h), PreservedValue (NumberToken s), PreservedValue (NumberToken l)] -> overColor round $ hslToRgb (h, s, l)
+    [PreservedValue (HashToken (_, n))] ->
+        let
             enned = if length n == 3
                 then foldr (\ en ens -> en : en : ens) [] n
                 else n
@@ -154,6 +173,23 @@ parseColor v = case v of
             b = read $ "0x" ++ drop 4 enned
         in (r, g, b)
     [PreservedValue (IdentToken n)] -> colorNameToColor M.! n
+    where
+        overColor f (r, g, b) = (f r, f g, f b)
+
+        hslToRgb :: (Float, Float, Float) -> (Float, Float, Float)
+        hslToRgb (_h, s, l) = ((r' + m) * 255, (b' + m) * 255, (g' + m) * 255)
+            where
+                h = fromIntegral $ round _h `mod` 360
+                c = (1 - abs (2 * l - 1)) * s
+                x = c * (1 - abs (fromIntegral $ (round (h / 60) `mod` 2) - 1))
+                m = l - c / 2
+                (r', g', b')
+                    | 0 <= h && h < 60 = (c, x, 0)
+                    | 60 <= h && h < 120 = (x, c, 0)
+                    | 120 <= h && h < 180 = (0, c, x)
+                    | 180 <= h && h < 240 = (0, x, c)
+                    | 240 <= h && h < 300 = (x, 0, c)
+                    | 300 <= h && h < 360 = (c, 0, x)
 
 selectorToString :: Selector -> String
 selectorToString selector = case selector of
@@ -169,10 +205,14 @@ parseDecleretiens ds out = case ds of
     (nextDeclaration : rest) -> parseDecleretiens rest $ case nextDeclaration of
         (DeclarationValue (Declaration n vs _)) -> out . case n of
             "position" -> case vs of
-                [PreservedValue (IdentToken "absolute")] -> const Nothing
-                _ -> id
+                [PreservedValue (IdentToken "relative")] -> id
+                _ -> const Nothing
+            "float" -> case vs of
+                [PreservedValue (IdentToken "none")] -> id
+                _ -> const Nothing
             "color" -> setColor vs Mortar.surroundForegroundColor
             "background" -> setColor vs Mortar.surroundBackgroundColor
+            "background-color" -> setColor vs Mortar.surroundBackgroundColor
             "font-weight" -> case vs of
                 [PreservedValue (IdentToken "bold")] -> fmap Mortar.surroundBold
             "font-style" -> case vs of
@@ -181,7 +221,7 @@ parseDecleretiens ds out = case ds of
             "text-decoration" -> case vs of
                 [PreservedValue (IdentToken "underline")] -> fmap Mortar.surroundUnderline
                 [PreservedValue (IdentToken "line-through")] -> fmap Mortar.surroundStrikethrough
-                [PreservedValue (IdentToken "none")] -> fmap (Mortar.getResetAttrs++)
+                [PreservedValue (IdentToken "none")] -> fmap ((Mortar.resetUnderline ++ Mortar.resetStrikethrough)++)
             _ -> out
     where
         setColor vs func = 
@@ -195,8 +235,7 @@ blamCSS :: [SelectorNode] -> [ComponentValue] -> (PreSelectorNode, [SelectorNode
 blamCSS collapsed css = case css of
     [] -> 
         let 
-            maybeStar = filter ((== [StarSelector]) . fst) collapsed
-            maybeStarless = filter ((/= [StarSelector]) . fst) collapsed
+            (maybeStar, maybeStarless) = L.partition ((== [StarSelector]) . fst) collapsed
         in 
             if not $ null maybeStar
                 then ((StarSelector, snd $ head maybeStar), maybeStarless)
@@ -208,20 +247,20 @@ _buildCSSTree :: (PreSelectorNode, [SelectorNode]) -> ((Selector, CSSAttribute),
 _buildCSSTree ((selector, val), css) =
     let 
         selectish :: SelectorNode -> [(PreSelectorNode, [SelectorNode])] -> [(PreSelectorNode, [SelectorNode])]
+        selectish ([], _) children = children
         selectish (currentSelector : rest, vals) children =
             let
-                filtered = filter ((== currentSelector) . fst . fst) children
+                (filtered, unfiltered) = L.partition ((== currentSelector) . fst . fst) children
                 ((_, add), left) = head filtered
-                unfiltered = filter ((/= currentSelector) . fst . fst) children
                 vals' = if null rest then vals else []
 
                 addendum remainder = if null rest
                     then remainder
                     else (rest, vals) : remainder
             in 
-                if not $ null filtered
-                    then ((currentSelector, add ++ vals'), addendum left) : unfiltered
-                    else ((currentSelector, vals'), addendum []) : children
+                if null filtered
+                    then ((currentSelector, vals'), addendum []) : children
+                    else ((currentSelector, add ++ vals'), addendum left) : unfiltered
 
         sorted :: [(PreSelectorNode, [SelectorNode])]
         sorted = foldr selectish [] css

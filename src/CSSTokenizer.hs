@@ -286,6 +286,7 @@ checkDigit = ready (sequentiate (++) [
             (rest, Left err) -> (rest, Left err)
             where go a = case a of
                     ('.':str) -> go $ "0." ++ str
+                    ('-':'.':str) -> go $ "-0." ++ str
                     ('+':str) -> go str
                     _ -> a
         orAnd (Parser f) (Parser g) = Parser $ \ stream -> case f stream of
@@ -335,21 +336,21 @@ postProcess :: [CSSToken] -> [CSSToken]
 postProcess out = filter (not . (`elem` [WhitespaceToken, NothingToken])) $ out ++ [EOFToken]
 
 basics :: String
-basics = """
-b {
-    font-weight: bold;
-}
-
-tt {
-    font-style: italic;
-}
-
-a {
-    color: blue;
-    text-decoration: underline;
-}
-
-"""
+basics = ""
+-- basics = """
+-- b {
+--     font-weight: bold;
+-- }
+--
+-- tt {
+--     font-style: italic;
+-- }
+--
+-- a {
+--     color: blue;
+--     text-decoration: underline;
+-- }
+-- """
 
 parseString :: String -> (String, Either Error [CSSToken])
 parseString str = 
