@@ -27,7 +27,7 @@ linkStyleTags = map $ \case
 
 nomUrl :: String -> String -> IO String
 nomUrl startUrl url = do
-    a <- parseRequest $ tracer $ resolveUrl startUrl url
+    a <- parseRequest $ resolveUrl startUrl url
     b <- httpLBS a
     pure $ unpack $ getResponseBody b
 

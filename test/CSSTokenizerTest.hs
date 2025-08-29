@@ -3,7 +3,7 @@ module CSSTokenizerTest where
 import Test.HUnit
 import qualified System.Exit as Exit
 import HTMLParser
-import Data.Either (isRight, isLeft)
+import Data.Either (isRight, isLeft, fromRight)
 
 import CSSTokenizer
 
@@ -15,6 +15,12 @@ matchNotStringTest = TestList [
     , TestLabel "yepString" $ TestCase $ assertFailed "Should work what" (matchNotString "asdf") "asdf"
     ]
 
+matchIdentTest = TestList [
+    TestLabel "dot" $ TestCase $ assertEqual "mhm" "a" (fromRight "" $ snd $ parse consumeIdentSequence "a.a")
+    , TestLabel "yep" $ TestCase $ assertEqual "mhm" (ClassToken "a") (fromRight (ClassToken "") $ snd $ parse consumeClass ".a")
+    ]
+
 tests = TestList [
-    TestLabel "matchNotString" $ matchNotStringTest
+    TestLabel "matchNotString" matchNotStringTest
+    , TestLabel "matchIdent" matchIdentTest
     ]

@@ -117,6 +117,7 @@ preProcess str = map (\ c -> case c of -- also replace surrogates somehow
 
 data CSSToken =
     IdentToken String
+    | ClassToken String
     | FunctionToken String
     | AtKeywordToken String
     | HashToken (Bool, String)
@@ -177,7 +178,7 @@ matchNonAscii :: Parser Char
 matchNonAscii = satisfy (\ c -> ord c >= 0x80)
 
 matchIdentStart :: Parser Char
-matchIdentStart = matchLetter <|> matchNonAscii <|> matchChar '_' <|> matchChar '.'
+matchIdentStart = matchLetter <|> matchNonAscii <|> matchChar '_'
 
 matchIdent :: Parser Char
 matchIdent = matchIdentStart <|> matchDigit <|> matchChar '-'
@@ -248,6 +249,9 @@ consumeHash = dropFirst <$> matchChar '#' <*> Parser (\ stream ->
     where
         dropFirst _ a = a
         (Parser doHashy) = HashToken <$> ((,) <$> passes checkWouldStartIdentSequence <*> consumeIdentSequence)
+
+consumeClass = dropFirst <$> matchChar '.' <*> consumeIdentSequence
+    where dropFirst _ = ClassToken
 
 consume :: Functor f => (t -> f a) -> b -> t -> f b
 consume matchy out char = mhm <$> matchy char
@@ -333,7 +337,7 @@ eatByStart (Parser check) (Parser consumer) = Parser $ \ stream -> case check st
     (rest, Left err) -> (rest, Left err)
 
 postProcess :: [CSSToken] -> [CSSToken]
-postProcess out = filter (not . (`elem` [WhitespaceToken, NothingToken])) $ out ++ [EOFToken]
+postProcess out = filter (not . (`elem` [NothingToken])) $ out ++ [EOFToken]
 
 basics :: String
 basics = ""
@@ -360,6 +364,7 @@ parseString str =
                 <|> consumeWhitespace
                 <|> consumeString '"'
                 <|> consumeHash
+                <|> consumeClass
                 <|> consumeString '\''
                 <|> consumeCharacter OpeningParenthesisToken '('
                 <|> consumeCharacter ClosingParenthesisToken ')'

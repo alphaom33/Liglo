@@ -51,8 +51,8 @@ getAttr :: Tag -> String -> Maybe Attribute
 getAttr t name = filter (\ (Attribute (n, _)) -> n == name) (_attrs t) L.!? 0
 
 applyStyle :: [Tag] -> Tree (Selector, CSSAttribute) -> CSSAttribute -> CSSAttribute
-applyStyle [] _ attribute = trace "a" attribute
-applyStyle (tag:tags) (Node (selector, value) children) attribute = case tracer selector of
+applyStyle [] _ attribute = attribute
+applyStyle (tag:tags) (Node (selector, value) children) attribute = case selector of
     StarSelector -> foldr (applyStyle (tag:tags)) (value . attribute) children
     (ClassSelector n) ->
         let classes = splitOn " " $ getAttrJust "class"
@@ -67,11 +67,11 @@ applyStyle (tag:tags) (Node (selector, value) children) attribute = case tracer 
             (ClassSelector n) ->
                 let classes = splitOn " " $ getAttrJust "class"
                 in elem n classes
-            (AttrSelector a c) -> c (getAttrJust a)
+            (AttrSelector a c) -> c (getAttrValue <$> getAttr tag a)
             (StateSelector _ _) -> False
             (SelectorGroup ss) -> foldr ((&&) . checkSelector) True ss
 
-        toNext currentAttribute = foldr (applyStyle tags) (value . currentAttribute) children 
+        toNext currentAttribute = foldr (applyStyle tags) (value . currentAttribute) children
 
         getAttrJust = maybe "" getAttrValue . getAttr tag
         getAttrValue (Attribute (_, v)) = v
@@ -108,7 +108,7 @@ _buildHtml mhm = case _toRead mhm of
                 | otherwise = doEnd mhm''
 
             doEnd mhm'' =
-                over openTags (drop 1) 
+                over openTags (drop 1)
                 . endings (head $ _openTags mhm'')
                 . killText
                 . putText (reverse $ _currentText mhm'')
@@ -132,7 +132,7 @@ _buildHtml mhm = case _toRead mhm of
     (_:_) -> _buildHtml mhm'
 
     [] -> appendHbox mhm
-    where 
+    where
         mhm' = over toRead (drop 1) mhm
 
         putText text = over out (\case
@@ -224,7 +224,7 @@ parseDecleretiens ds out = case ds of
                 [PreservedValue (IdentToken "none")] -> fmap ((Mortar.resetUnderline ++ Mortar.resetStrikethrough)++)
             _ -> out
     where
-        setColor vs func = 
+        setColor vs func =
             let (r, g, b) = parseColor vs
             in fmap (func r g b)
 
@@ -233,19 +233,19 @@ buildCSSTree css = unfoldTree _buildCSSTree (blamCSS [] css)
 
 blamCSS :: [SelectorNode] -> [ComponentValue] -> (PreSelectorNode, [SelectorNode])
 blamCSS collapsed css = case css of
-    [] -> 
-        let 
+    [] ->
+        let
             (maybeStar, maybeStarless) = L.partition ((== [StarSelector]) . fst) collapsed
-        in 
+        in
             if not $ null maybeStar
                 then ((StarSelector, snd $ head maybeStar), maybeStarless)
                 else ((StarSelector, []), collapsed)
-    (SimpleBlockValue (SimpleCurlyBlock (CurlyBlock ss ds)) : rest) -> blamCSS (map (\ s -> (reverse s, ds)) ss ++ collapsed) rest
+    (SimpleBlockValue (SimpleCurlyBlock (CurlyBlock ss ds)) : rest) -> blamCSS ((reverse ss, ds) : collapsed) rest
     (_:rest) -> blamCSS collapsed rest
 
 _buildCSSTree :: (PreSelectorNode, [SelectorNode]) -> ((Selector, CSSAttribute), [(PreSelectorNode, [SelectorNode])])
 _buildCSSTree ((selector, val), css) =
-    let 
+    let
         selectish :: SelectorNode -> [(PreSelectorNode, [SelectorNode])] -> [(PreSelectorNode, [SelectorNode])]
         selectish ([], _) children = children
         selectish (currentSelector : rest, vals) children =
@@ -257,7 +257,7 @@ _buildCSSTree ((selector, val), css) =
                 addendum remainder = if null rest
                     then remainder
                     else (rest, vals) : remainder
-            in 
+            in
                 if null filtered
                     then ((currentSelector, vals'), addendum []) : children
                     else ((currentSelector, add ++ vals'), addendum left) : unfiltered

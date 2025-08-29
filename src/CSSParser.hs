@@ -11,8 +11,9 @@ import Data.List.Split
 
 import Data.Map ((!), fromList)
 import Data.Char (toLower)
+import Data.Maybe (fromMaybe)
 
-type AttrNess = (String -> Bool)
+type AttrNess = (Maybe String -> Bool)
 instance Show AttrNess where
     show _ = "<attr>"
 instance Eq AttrNess where
@@ -29,7 +30,7 @@ data Selector =
     | SelectorGroup [Selector]
     deriving (Show, Eq)
 
-data CurlyBlock = CurlyBlock [[Selector]] [ComponentValue] deriving (Show, Eq)
+data CurlyBlock = CurlyBlock [Selector] [ComponentValue] deriving (Show, Eq)
 newtype SquareBlock = SquareBlock [ComponentValue] deriving (Show, Eq)
 newtype ParenthesisBlock = ParenthesisBlock [ComponentValue] deriving (Show, Eq)
 
@@ -121,59 +122,53 @@ matchStar s v = go v (length v - length s)
 matchspaced :: [Char] -> [Char] -> Bool
 matchspaced s = elem s . splitOn " "
 
-parseTokenList :: [[Selector]] -> [Selector] -> [ComponentValue] -> [[Selector]]
+eatSquare (ClosingSquareBracketToken : rest) = (rest, [ClosingSquareBracketToken])
+eatSquare (WhitespaceToken : rest) = eatSquare rest
+eatSquare (next : rest) = (next:) <$> eatSquare rest
+
+parseTokenList :: [Selector] -> [Selector] -> [ComponentValue] -> [Selector]
 parseTokenList _out _currentList _tokens = go _out _currentList (map (\ (PreservedValue p) -> p) _tokens)
     where
-        go out currentList tokens = case tracer tokens of
+        go out currentList tokens = case tokens of
             [] -> reverse $ if null currentList
                 then out
                 else addCurrentList
 
+            (WhitespaceToken : rest) -> go out currentList rest
+            (CommaToken : rest) -> go addCurrentList [] rest
+
             (DelimToken '*' : rest) -> go out (StarSelector : currentList) rest
 
-            (ColonToken : ColonToken : _ : rest) ->
-                go out currentList rest -- TODO do this
-
-            (locator : ColonToken : pseudoClass : rest) ->
-                go out (StateSelector (grabStr locator) (grabStr pseudoClass) : currentList) rest
+            (IdentToken tagName : OpeningSquareBracketToken : IdentToken attr : rest) -> case square of
+                (DelimToken '=' : rest'') -> getAttrSelector (==) rest''
+                (DelimToken '~' : DelimToken '=' : rest'') -> getAttrSelector matchspaced rest''
+                (DelimToken '|' : DelimToken '=' : rest'') -> getAttrSelector (\ against v -> v == against || take (length against + 1) v == against ++ "-") rest''
+                (DelimToken '^' : DelimToken '=' : rest'') -> getAttrSelector (\ against -> (== against) . take (length against)) rest''
+                (DelimToken '$' : DelimToken '=' : rest'') -> getAttrSelector (\ against -> (== against) . reverse . take (length against) . reverse) rest''
+                (DelimToken '*' : DelimToken '=' : rest'') -> getAttrSelector matchStar rest''
+                rest'' -> addAttrSelector (/= Nothing) rest''
                 where
-                    grabStr token = case token of
-                        (IdentToken s') -> s'
-                        (HashToken (_, s')) -> s'
+                    (rest', square) = eatSquare rest
 
-            (DelimToken '>' : child : rest) ->
-                go out (tokenToSelector child : currentList) rest
+                    getAttrSelector check (StringToken against : rest'') = addAttrSelector (check against . fromMaybe "") rest''
 
-            (IdentToken tagName : OpeningSquareBracketToken : IdentToken attr : rest) -> case rest of
-                (DelimToken '=' : rest') -> getAttrSelector (==) rest'
-                (DelimToken '~' : DelimToken '=' : rest') -> getAttrSelector matchspaced rest'
-                (DelimToken '|' : DelimToken '=' : rest') -> getAttrSelector (\ against v -> v == against || take (length against + 1) v == against ++ "-") rest'
-                (DelimToken '^' : DelimToken '=' : rest') -> getAttrSelector (\ against -> (== against) . take (length against)) rest'
-                (DelimToken '$' : DelimToken '=' : rest') -> getAttrSelector (\ against -> (== against) . reverse . take (length against) . reverse) rest'
-                (DelimToken '*' : DelimToken '=' : rest') -> getAttrSelector matchStar rest'
-                rest' -> addAttrSelector (/= "") rest'
-                where
-                    getAttrSelector check (StringToken against : rest') = addAttrSelector (check against) rest'
-                    addAttrSelector check rest' = case rest' of
-                        (IdentToken "i" : rest'') -> finish (map toLower attr) (check . map toLower) rest''
-                        (IdentToken "I" : rest'') -> finish (map toLower attr) (check . map toLower) rest''
-                        (IdentToken "s" : rest'') -> finish attr check rest''
-                        (IdentToken "S" : rest'') -> finish attr check rest''
-                        _ -> finish attr check rest'
+                    addAttrSelector :: AttrNess -> [CSSToken] -> [Selector]
+                    addAttrSelector check rest'' = case rest'' of
+                        (IdentToken "i" : _) -> finish (map toLower attr) (check . fmap (map toLower))
+                        (IdentToken "I" : _) -> finish (map toLower attr) (check . fmap (map toLower))
+                        (IdentToken "s" : _) -> finish attr check
+                        (IdentToken "S" : _) -> finish attr check
+                        _ -> finish attr check
                         where 
-                            finish attr' check' (ClosingSquareBracketToken : rest'') = go out (SelectorGroup [TagSelector tagName, AttrSelector attr' check'] : currentList) rest''
+                            finish attr' check' = go out (SelectorGroup [TagSelector tagName, AttrSelector attr' check'] : currentList) rest'
 
-            (nextToken : rest) -> case nextToken of
-                SemicolonToken -> go out currentList rest -- TODO actually figure this out
-                CommaToken -> go addCurrentList [] rest
-                _ -> go out (tokenToSelector nextToken : currentList) rest
+            (nextToken : rest) -> go out (tokenToSelector nextToken : currentList) rest
             where
-                addCurrentList = reverse currentList : out
+                addCurrentList = SelectorGroup (reverse currentList) : out
 
-        tokenToSelector nextToken = case tracer nextToken of
-            (IdentToken n) -> case n of
-                ('.':n') -> ClassSelector n'
-                _ -> TagSelector n
+        tokenToSelector nextToken = case nextToken of
+            (IdentToken n) -> TagSelector n
+            (ClassToken n) -> ClassSelector n
             (HashToken (_, n)) -> HashSelector n
 
 consumeSimpleBlock :: [ComponentValue] -> [CSSToken] -> (ComponentValue, [CSSToken])
@@ -352,7 +347,7 @@ outList out delim (val:rest) = outList (out ++ (case val of
     (PreservedValue (DimensionToken (n, d))) -> show n ++ d
     (PreservedValue (PercentageToken n)) -> show n ++ "%"
     (PreservedValue (HashToken (id, n))) -> "#" ++ n
-    (SimpleBlockValue (SimpleCurlyBlock (CurlyBlock t c))) -> foldr (\ t -> ((outList "" "" (map SelectorValue t) ++ ",") ++)) "" t ++ " {\n" ++ replaceAll "\n" "\n\t" (outList "\t" "" c) ++ "}\n\n"
+    (SimpleBlockValue (SimpleCurlyBlock (CurlyBlock t c))) -> outList "" "" (map SelectorValue t) ++ " {\n" ++ replaceAll "\n" "\n\t" (outList "\t" "" c) ++ "}\n\n"
     (SimpleBlockValue (SimpleSquareBlock (SquareBlock c))) -> "[" ++ outList "" "" c ++ "]"
     (SimpleBlockValue (SimpleParenthesisBlock (ParenthesisBlock c))) -> "(" ++ outList "" "" c ++ ")"
     (DeclarationValue (Declaration n v i)) -> n ++ ": " ++ outList "" " " v ++ (if i then "!important" else "") ++ ";\n"

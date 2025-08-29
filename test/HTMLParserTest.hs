@@ -5,7 +5,7 @@ import qualified System.Exit as Exit
 import HTMLParser
 import Data.Either (isRight, isLeft)
 
-testSelfClosing = TestList $ [
+testSelfClosing = TestList [
     TestLabel "basic" $ TestCase (assertEqual "" (_emitted (parseString "<meta />")) [
         TagToken $ Tag {_tagName="meta", _selfClosing=True, _opening=True, _attrs=[]}
         , EOF
@@ -16,6 +16,6 @@ testSelfClosing = TestList $ [
         ])
     ]
 
-tests = TestList $ [
+tests = TestList [
     TestLabel "TestSelfClosing" testSelfClosing
     ]

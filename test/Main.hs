@@ -6,6 +6,7 @@ import HTMLParser
 import Data.Either (isRight, isLeft)
 
 import qualified HTMLParserTest as H
+import qualified HTMLBuilderTest as HB
 import qualified CSSTokenizerTest as T
 import qualified CSSParserTest as P
 
@@ -23,5 +24,6 @@ main = do
         , TestLabel "CSSTokenizerTest" T.tests
         , TestLabel "CSSParserTest" P.tests
         , TestLabel "NomURLTest" nomUrlTests
+        , TestLabel "HTMLBuilderTest" HB.tests
         ]
     if failures result > 0 then Exit.exitFailure else Exit.exitSuccess
