@@ -27,8 +27,18 @@ testMatchlist = TestList [
     where
         assertMatch t c v = TestCase $ assertEqual "" t $ matchspaced c v
 
+testMatchCombinator = TestList [
+        TestLabel "childBasic" $ TestCase $ assertEqual "" (ChildCombinator, []) $ matchCombinator [DelimToken '>']
+        , TestLabel "childWhite" $ TestCase $ assertEqual "" (ChildCombinator, [WhitespaceToken]) $ matchCombinator [WhitespaceToken, DelimToken '>', WhitespaceToken]
+        , TestLabel "white" $ TestCase $ assertEqual "" (DescendantCombinator, [IdentToken ""]) $ matchCombinator [WhitespaceToken, IdentToken ""]
+        , TestLabel "whiteEnd" $ TestCase $ assertEqual "" (CurrentCombinator, []) $ matchCombinator [WhitespaceToken]
+        , TestLabel "current" $ TestCase $ assertEqual "" (CurrentCombinator, [IdentToken ""]) $ matchCombinator [IdentToken ""]
+        , TestLabel "currentEnd" $ TestCase $ assertEqual "" (CurrentCombinator, []) $ matchCombinator []
+    ]
+
 tests = TestList [
     TestLabel "killrest" testKillrest
     , TestLabel "matchstar" testMatchstar
     , TestLabel "matchlist" testMatchlist
+    , TestLabel "matchCombinator" testMatchCombinator
     ]

@@ -28,20 +28,20 @@ instance Show CSSAttribute where
     show _ = "<attr>"
 
 
-type PreSelectorNode = (Selector, [ComponentValue])
-type SelectorNode = ([Selector], [ComponentValue])
+type PreSelectorNode = (SelectorData, [ComponentValue])
+type SelectorNode = ([SelectorData], [ComponentValue])
 
 data BuilderData = BuilderData {
     _toRead :: [Token]
     , _openTags :: [Tag]
     , _out :: [String]
     , _currentText :: String
-    , _style :: Tree (Selector, CSSAttribute)
+    , _style :: Tree (SelectorData, CSSAttribute)
     , _lined :: Bool
 } deriving Show
 $(makeLenses ''BuilderData)
 
-builderData :: [Token] -> Tree (Selector, CSSAttribute) -> BuilderData
+builderData :: [Token] -> Tree (SelectorData, CSSAttribute) -> BuilderData
 builderData emittedTokens p_style = BuilderData {_openTags=[], _toRead=emittedTokens, _out=[], _currentText="", _style=p_style, _lined=True}
 
 makeWidget :: BuilderData -> CSSAttribute
@@ -50,34 +50,46 @@ makeWidget mhm = applyStyle (_openTags mhm) (_style mhm) id
 getAttr :: Tag -> String -> Maybe Attribute
 getAttr t name = filter (\ (Attribute (n, _)) -> n == name) (_attrs t) L.!? 0
 
-applyStyle :: [Tag] -> Tree (Selector, CSSAttribute) -> CSSAttribute -> CSSAttribute
-applyStyle [] _ attribute = attribute
-applyStyle (tag:tags) (Node (selector, value) children) attribute = case selector of
-    StarSelector -> foldr (applyStyle (tag:tags)) (value . attribute) children
+
+checkSelector tag selector = case selector of
+    (TagSelector n) -> n == _tagName tag
+    (HashSelector n) -> n == getAttrJust tag "id"
     (ClassSelector n) ->
-        let classes = splitOn " " $ getAttrJust "class"
+        let classes = splitOn " " $ getAttrJust tag "class"
+        in elem n classes
+    (AttrSelector a c) -> c (getAttrValue <$> getAttr tag a)
+    (StateSelector _ _) -> False
+
+getAttrJust tag = maybe "" getAttrValue . getAttr tag
+getAttrValue (Attribute (_, v)) = v
+
+applyStyle :: [Tag] -> Tree (SelectorData, CSSAttribute) -> CSSAttribute -> CSSAttribute
+applyStyle [] _ attribute = attribute
+applyStyle (tag:tags) (Node ((combinator, selector), value) children) attribute = case selector of
+    StarSelector -> toNext (tag:tags) attribute
+    (ClassSelector n) ->
+        let classes = splitOn " " $ getAttrJust tag "class"
         in foldr (checkStyleApply n) attribute classes
-    _ -> if checkSelector selector
-        then toNext attribute
-        else attribute
+    _ -> case combinator of
+        CurrentCombinator -> if checkSelector tag selector
+            then toNext (tag:tags) attribute
+            else attribute
+        ChildCombinator -> if checkSelector tag selector
+            then toNext tags attribute
+            else attribute
+        -- DescendantCombinator -> case go (tag:tags) of
+        --     [] -> attribute
+        --     rest -> toNext rest attribute
+        where
+            go [] = []
+            go (tag:tags) = if checkSelector tag selector
+                then tags
+                else go tags
     where
-        checkSelector selector = case selector of
-            (TagSelector n) -> n == _tagName tag
-            (HashSelector n) -> n == getAttrJust "id"
-            (ClassSelector n) ->
-                let classes = splitOn " " $ getAttrJust "class"
-                in elem n classes
-            (AttrSelector a c) -> c (getAttrValue <$> getAttr tag a)
-            (StateSelector _ _) -> False
-            (SelectorGroup ss) -> foldr ((&&) . checkSelector) True ss
-
-        toNext currentAttribute = foldr (applyStyle tags) (value . currentAttribute) children
-
-        getAttrJust = maybe "" getAttrValue . getAttr tag
-        getAttrValue (Attribute (_, v)) = v
+        toNext tags currentAttribute = foldr (applyStyle tags) (value . currentAttribute) children
 
         checkStyleApply check val currentAttribute = if check == val
-            then toNext currentAttribute
+            then toNext tags currentAttribute
             else attribute
 
 _buildHtml :: BuilderData -> BuilderData
@@ -228,22 +240,22 @@ parseDecleretiens ds out = case ds of
             let (r, g, b) = parseColor vs
             in fmap (func r g b)
 
-buildCSSTree :: [ComponentValue] -> Tree (Selector, CSSAttribute)
+buildCSSTree :: [ComponentValue] -> Tree (SelectorData, CSSAttribute)
 buildCSSTree css = unfoldTree _buildCSSTree (blamCSS [] css)
 
 blamCSS :: [SelectorNode] -> [ComponentValue] -> (PreSelectorNode, [SelectorNode])
 blamCSS collapsed css = case css of
     [] ->
         let
-            (maybeStar, maybeStarless) = L.partition ((== [StarSelector]) . fst) collapsed
+            (maybeStar, maybeStarless) = L.partition ((== [(CurrentCombinator, StarSelector)]) . fst) collapsed
         in
             if not $ null maybeStar
-                then ((StarSelector, snd $ head maybeStar), maybeStarless)
-                else ((StarSelector, []), collapsed)
-    (SimpleBlockValue (SimpleCurlyBlock (CurlyBlock ss ds)) : rest) -> blamCSS ((reverse ss, ds) : collapsed) rest
+                then (((CurrentCombinator, StarSelector), snd $ head maybeStar), maybeStarless)
+                else (((CurrentCombinator, StarSelector), []), collapsed)
+    (SimpleBlockValue (SimpleCurlyBlock (CurlyBlock ss ds)) : rest) -> blamCSS (map (\ s -> (reverse s, ds)) ss ++ collapsed) rest
     (_:rest) -> blamCSS collapsed rest
 
-_buildCSSTree :: (PreSelectorNode, [SelectorNode]) -> ((Selector, CSSAttribute), [(PreSelectorNode, [SelectorNode])])
+_buildCSSTree :: (PreSelectorNode, [SelectorNode]) -> ((SelectorData, CSSAttribute), [(PreSelectorNode, [SelectorNode])])
 _buildCSSTree ((selector, val), css) =
     let
         selectish :: SelectorNode -> [(PreSelectorNode, [SelectorNode])] -> [(PreSelectorNode, [SelectorNode])]
@@ -266,7 +278,7 @@ _buildCSSTree ((selector, val), css) =
         sorted = foldr selectish [] css
     in ((selector, parseDecleretiens val id), sorted)
 
-countCSSTree :: Int -> Tree (Selector, CSSAttribute) -> Int
+countCSSTree :: Int -> Tree (SelectorData, CSSAttribute) -> Int
 countCSSTree num tree = case subForest tree of
     [] -> 1
     _ -> foldr ((+) . countCSSTree 0) num (subForest tree)

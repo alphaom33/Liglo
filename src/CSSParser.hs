@@ -12,6 +12,7 @@ import Data.List.Split
 import Data.Map ((!), fromList)
 import Data.Char (toLower)
 import Data.Maybe (fromMaybe)
+import Data.List (intersect)
 
 type AttrNess = (Maybe String -> Bool)
 instance Show AttrNess where
@@ -19,6 +20,13 @@ instance Show AttrNess where
 instance Eq AttrNess where
     (==) _ _ = True
 
+type SelectorData = (Combinator, Selector)
+
+data Combinator =
+    DescendantCombinator
+    | ChildCombinator
+    | CurrentCombinator
+    deriving (Show, Eq)
 
 data Selector =
     TagSelector String
@@ -27,10 +35,9 @@ data Selector =
     | StateSelector String String
     | StarSelector
     | AttrSelector String AttrNess
-    | SelectorGroup [Selector]
     deriving (Show, Eq)
 
-data CurlyBlock = CurlyBlock [Selector] [ComponentValue] deriving (Show, Eq)
+data CurlyBlock = CurlyBlock [[SelectorData]] [ComponentValue] deriving (Show, Eq)
 newtype SquareBlock = SquareBlock [ComponentValue] deriving (Show, Eq)
 newtype ParenthesisBlock = ParenthesisBlock [ComponentValue] deriving (Show, Eq)
 
@@ -122,24 +129,38 @@ matchStar s v = go v (length v - length s)
 matchspaced :: [Char] -> [Char] -> Bool
 matchspaced s = elem s . splitOn " "
 
+eatSquare :: [CSSToken] -> ([CSSToken], [CSSToken])
 eatSquare (ClosingSquareBracketToken : rest) = (rest, [ClosingSquareBracketToken])
 eatSquare (WhitespaceToken : rest) = eatSquare rest
 eatSquare (next : rest) = (next:) <$> eatSquare rest
 
-parseTokenList :: [Selector] -> [Selector] -> [ComponentValue] -> [Selector]
+parseTokenList :: [[SelectorData]] -> [SelectorData] -> [ComponentValue] -> [[SelectorData]]
 parseTokenList _out _currentList _tokens = go _out _currentList (map (\ (PreservedValue p) -> p) _tokens)
     where
-        go out currentList tokens = case tokens of
-            [] -> reverse $ if null currentList
-                then out
-                else addCurrentList
+        go :: [[SelectorData]] -> [SelectorData] -> [CSSToken] -> [[SelectorData]]
+        go out currentList [] = reverse $ if null currentList
+            then out
+            else currentList : out
 
-            (WhitespaceToken : rest) -> go out currentList rest
-            (CommaToken : rest) -> go addCurrentList [] rest
+        go out currentList (next : tokens) = case next of
+            WhitespaceToken -> go out currentList tokens
+            CommaToken -> go addCurrentList [] tokens
+            _ -> onward (next:tokens)
+            where
+                onward css = 
+                    let 
+                        (selector, rest) = matchSelector css
+                        (combinator, rest') = matchCombinator rest
+                    in go out ((combinator, selector) : currentList) rest'
+                addCurrentList = reverse currentList : out
 
-            (DelimToken '*' : rest) -> go out (StarSelector : currentList) rest
+        matchSelector :: [CSSToken] -> (Selector, [CSSToken])
+        matchSelector css = case css of
+            (WhitespaceToken : rest) -> matchSelector rest
 
-            (IdentToken tagName : OpeningSquareBracketToken : IdentToken attr : rest) -> case square of
+            (DelimToken '*' : rest) -> (StarSelector, rest)
+
+            (OpeningSquareBracketToken : IdentToken attr : rest) -> case square of
                 (DelimToken '=' : rest'') -> getAttrSelector (==) rest''
                 (DelimToken '~' : DelimToken '=' : rest'') -> getAttrSelector matchspaced rest''
                 (DelimToken '|' : DelimToken '=' : rest'') -> getAttrSelector (\ against v -> v == against || take (length against + 1) v == against ++ "-") rest''
@@ -152,7 +173,6 @@ parseTokenList _out _currentList _tokens = go _out _currentList (map (\ (Preserv
 
                     getAttrSelector check (StringToken against : rest'') = addAttrSelector (check against . fromMaybe "") rest''
 
-                    addAttrSelector :: AttrNess -> [CSSToken] -> [Selector]
                     addAttrSelector check rest'' = case rest'' of
                         (IdentToken "i" : _) -> finish (map toLower attr) (check . fmap (map toLower))
                         (IdentToken "I" : _) -> finish (map toLower attr) (check . fmap (map toLower))
@@ -160,16 +180,32 @@ parseTokenList _out _currentList _tokens = go _out _currentList (map (\ (Preserv
                         (IdentToken "S" : _) -> finish attr check
                         _ -> finish attr check
                         where 
-                            finish attr' check' = go out (SelectorGroup [TagSelector tagName, AttrSelector attr' check'] : currentList) rest'
+                            finish attr' check' = (AttrSelector attr' check', rest')
 
-            (nextToken : rest) -> go out (tokenToSelector nextToken : currentList) rest
-            where
-                addCurrentList = SelectorGroup (reverse currentList) : out
+            (nextToken : rest) -> (tokenToSelector nextToken, rest)
 
         tokenToSelector nextToken = case nextToken of
             (IdentToken n) -> TagSelector n
             (ClassToken n) -> ClassSelector n
             (HashToken (_, n)) -> HashSelector n
+
+matchCombinator :: [CSSToken] -> (Combinator, [CSSToken])
+matchCombinator [] = (CurrentCombinator, [])
+matchCombinator tokens = (getCombinator, rest)
+    where
+        getCombinator
+            | not $ null $ [EOFToken, CommaToken] `intersect` eatWhitten = CurrentCombinator
+            | DelimToken '>' `elem` eatWhitten = ChildCombinator
+            | WhitespaceToken `elem` eatWhitten = DescendantCombinator
+            | otherwise = CurrentCombinator
+
+        (rest, eatWhitten) = eatWhite tokens
+        
+        eatWhite :: [CSSToken] -> ([CSSToken], [CSSToken])
+        eatWhite [] = ([], [EOFToken])
+        eatWhite (WhitespaceToken : rest') = (WhitespaceToken :) <$> eatWhite rest'
+        eatWhite (DelimToken '>' : rest') = (rest', [DelimToken '>'])
+        eatWhite (next : rest') = (next:rest', [next])
 
 consumeSimpleBlock :: [ComponentValue] -> [CSSToken] -> (ComponentValue, [CSSToken])
 consumeSimpleBlock tokens (startingToken:s) =
@@ -347,7 +383,7 @@ outList out delim (val:rest) = outList (out ++ (case val of
     (PreservedValue (DimensionToken (n, d))) -> show n ++ d
     (PreservedValue (PercentageToken n)) -> show n ++ "%"
     (PreservedValue (HashToken (id, n))) -> "#" ++ n
-    (SimpleBlockValue (SimpleCurlyBlock (CurlyBlock t c))) -> outList "" "" (map SelectorValue t) ++ " {\n" ++ replaceAll "\n" "\n\t" (outList "\t" "" c) ++ "}\n\n"
+    (SimpleBlockValue (SimpleCurlyBlock (CurlyBlock t c))) -> foldr (\ ss -> (outList "" "" (map (SelectorValue . snd) ss) ++) . (", " ++)) "" t ++ " {\n" ++ replaceAll "\n" "\n\t" (outList "\t" "" c) ++ "}\n\n"
     (SimpleBlockValue (SimpleSquareBlock (SquareBlock c))) -> "[" ++ outList "" "" c ++ "]"
     (SimpleBlockValue (SimpleParenthesisBlock (ParenthesisBlock c))) -> "(" ++ outList "" "" c ++ ")"
     (DeclarationValue (Declaration n v i)) -> n ++ ": " ++ outList "" " " v ++ (if i then "!important" else "") ++ ";\n"
