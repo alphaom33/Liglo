@@ -26,6 +26,7 @@ data Combinator =
     DescendantCombinator
     | ChildCombinator
     | CurrentCombinator
+    | CurrendantCombinator
     deriving (Show, Eq)
 
 data Selector =
@@ -68,11 +69,6 @@ data Rule =
         , atPrelude :: [ComponentValue]
         , atBlock :: Maybe CurlyBlock
     }
-    | QualifiedRule {
-        qualifiedPrelude :: [ComponentValue]
-        , qualifiedBlock :: CurlyBlock
-    }
-    | DeclarationRule Declaration
     deriving (Show, Eq)
 
 parseList :: [CSSToken] -> [ComponentValue]
@@ -100,6 +96,7 @@ consumeComponentValue = go []
             -- OpeningSquareBracketToken -> consumeSimpleBlock (reverse tokens) state
             OpeningParenthesisToken -> consumeSimpleBlock (reverse tokens) state
             (FunctionToken _) -> consumeFunction state
+            (AtKeywordToken _) -> consumeAtRule state
             _ -> if nextnextInputToken == EOFToken
                 then (PreservedValue nextInputToken, state')
                 else go (PreservedValue nextInputToken : tokens) state'
@@ -135,23 +132,29 @@ eatSquare (WhitespaceToken : rest) = eatSquare rest
 eatSquare (next : rest) = (next:) <$> eatSquare rest
 
 parseTokenList :: [[SelectorData]] -> [SelectorData] -> [ComponentValue] -> [[SelectorData]]
-parseTokenList _out _currentList _tokens = go _out _currentList (map (\ (PreservedValue p) -> p) _tokens)
+parseTokenList _out _currentList _tokens = 
+    let datas = go _out _currentList $ dropWhile (== WhitespaceToken) $ map (\ (PreservedValue p) -> p) _tokens
+    in map (\ ((_, a):rest) -> (CurrendantCombinator, a):rest) datas
     where
         go :: [[SelectorData]] -> [SelectorData] -> [CSSToken] -> [[SelectorData]]
         go out currentList [] = reverse $ if null currentList
             then out
             else currentList : out
 
+        go out currentList (ColonToken : IdentToken _ : tokens) = go out currentList tokens
+        go out currentList (ColonToken : ColonToken : IdentToken _ : tokens) = go out currentList tokens
+
         go out currentList (next : tokens) = case next of
-            WhitespaceToken -> go out currentList tokens
             CommaToken -> go addCurrentList [] tokens
             _ -> onward (next:tokens)
             where
                 onward css = 
                     let 
-                        (selector, rest) = matchSelector css
-                        (combinator, rest') = matchCombinator rest
-                    in go out ((combinator, selector) : currentList) rest'
+                        (combinator, rest) = matchCombinator css
+                        (selector, rest') = matchSelector rest
+                    in if null rest
+                        then go out currentList rest
+                        else go out ((combinator, selector) : currentList) rest'
                 addCurrentList = reverse currentList : out
 
         matchSelector :: [CSSToken] -> (Selector, [CSSToken])
@@ -233,53 +236,16 @@ consumeSimpleBlock tokens (startingToken:s) =
             , (OpeningParenthesisToken, SimpleParenthesisBlock . ParenthesisBlock)
             ]
 
-consumeQualifiedRule :: [CSSToken] -> (Maybe Rule, [CSSToken])
-consumeQualifiedRule = go []
+consumeAtRule :: [CSSToken] -> (ComponentValue, [CSSToken])
+consumeAtRule ((AtKeywordToken name):s) = go [] s
     where
-        go :: [ComponentValue] -> [CSSToken] -> (Maybe Rule, [CSSToken])
-        go prelude state = case nextInputToken of
-            EOFToken -> (Nothing, state)
-            OpeningCurlyBracketToken ->
-                let (SimpleBlockValue (SimpleCurlyBlock val), state'') = consumeSimpleBlock [] state
-                in (Just QualifiedRule {qualifiedPrelude=prelude, qualifiedBlock=val}, state'')
-            _ -> let (val, state'') = consumeComponentValue state in go (val:prelude) state''
-            where
-                (nextInputToken:state') = state
-
-consumeAtRule :: [CSSToken] -> (Rule, [CSSToken])
-consumeAtRule s = go [] state
-    where
-        go :: [ComponentValue] -> [CSSToken] -> (Rule, [CSSToken])
         go prelude state = case nextInputToken of
             SemicolonToken -> (attish Nothing, state')
             EOFToken -> (attish Nothing, state)
             OpeningCurlyBracketToken -> let (SimpleBlockValue (SimpleCurlyBlock val), state'') = consumeSimpleBlock [] state in (attish (Just val), state'')
             _ -> let (val, state'') = consumeComponentValue state in go (val:prelude) state''
             where
-                attish block = AtRule {atName=name, atPrelude=prelude, atBlock=block}
-                (nextInputToken:state') = state
-        ((AtKeywordToken name):state) = s
-
-consumeListOfRules :: Bool -> [CSSToken] -> ([Rule], [CSSToken])
-consumeListOfRules topLevelFlag state = go [] state
-    where
-        go :: [Rule] -> [CSSToken] -> ([Rule], [CSSToken])
-        go rules state = case nextInputToken of
-            WhitespaceToken -> go rules state'
-            EOFToken -> (rules, state)
-            CDOToken -> qualify
-            CDCToken -> qualify
-            (AtKeywordToken _) -> let (val, state'') = consumeAtRule state in go (val:rules) state
-            _ -> let (val, state'') = consumeQualifiedRule state in case val of
-                (Just val) -> go (val:rules) state''
-                Nothing -> go rules state''
-            where
-                qualify = if topLevelFlag
-                    then go rules state'
-                    else let (val, state'') = consumeQualifiedRule state in case val of
-                        (Just val) -> go (val:rules) state''
-                        Nothing -> go rules state''
-
+                attish block = RuleValue AtRule {atName=name, atPrelude=prelude, atBlock=block}
                 (nextInputToken:state') = state
 
 consumeDeclaration :: [CSSToken] -> (Maybe Declaration, [CSSToken])
@@ -325,23 +291,6 @@ consumeIdent state = go [] state
             else go (nextInputToken:tokens) state'
             where (nextInputToken:state') = state
 
-consumeStyleBlock state = go [] [] state
-    where
-        go decls rules state = case nextInputToken of
-            WhitespaceToken -> go decls rules state'
-            SemicolonToken -> go decls rules state'
-            EOFToken -> decls ++ rules
-            (AtKeywordToken _) -> let (val, state'') = consumeAtRule state in go decls (val:rules) state''
-            (IdentToken _) -> let (val, state'') = consumeIdent state in case val of
-                (Just val) -> go (DeclarationRule val:decls) rules state''
-                Nothing -> go decls rules state''
-            (DelimToken '&') -> let (val, state'') = consumeQualifiedRule state in case val of
-                (Just val) -> go decls (val:rules) state''
-                Nothing -> go decls rules state''
-            _ -> go decls rules $ killUnknown state
-            where
-                (nextInputToken:state') = state
-
 consumeListOfDeclarations :: [CSSToken] -> ([ComponentValue], [CSSToken])
 consumeListOfDeclarations = go []
     where
@@ -351,7 +300,7 @@ consumeListOfDeclarations = go []
             WhitespaceToken -> go list state'
             SemicolonToken -> go list state'
             EOFToken -> (list, state)
-            (AtKeywordToken _) -> let (val, state'') = consumeAtRule state in go (RuleValue val:list) state''
+            (AtKeywordToken _) -> let (val, state'') = consumeAtRule state in go (val:list) state''
             (IdentToken _) -> let (val, state'') = consumeIdent state in case val of
                 (Just val) -> go (DeclarationValue val:list) state''
                 Nothing -> go list state''

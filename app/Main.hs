@@ -47,22 +47,22 @@ main = do
     -- when (S._curQuery finalState == head args) (do
     --     print "exited forcefully"
     --     exitSuccess)
-
+    --
     -- let finalURL = S._curQuery finalState
     -- writeFile "asdf.url" finalURL
-
+    --
     -- a <- parseRequest finalURL
     -- b <- httpLBS a
     -- let asdf = unpack (getResponseBody b)
     -- writeFile "asdf.html" asdf
     asdf <- readFile "asdf.html"
     let result = _emitted $ parseString asdf
-
+    --
     -- let styleLinks = linkStyleTags $ grabStylesheets result
     -- yankedStyles <- foldr (\ a b -> (++) <$> nomUrl finalURL a <*> b) (pure []) styleLinks
-
+    --
     -- let styleInlines = takeStyles "" result
-
+    --
     -- let str = yankedStyles ++ styleInlines
     -- writeFile "asdf.css" str
     str <- readFile "asdf.css"
@@ -71,7 +71,8 @@ main = do
     let outer = CP.parseList $ fromRight [] $ snd out
     let outest = H.parseWebpage result outer
 
-    print outest
+    -- print outest
     -- putStr $ H.drawCSSTree outer
-    -- Mortar.appIt outest Mortar.initialState
+    print outest
+    Mortar.appIt outest Mortar.initialState
 

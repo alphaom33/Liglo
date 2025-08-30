@@ -356,6 +356,10 @@ basics = ""
 -- }
 -- """
 
+consumeAtKeyword :: Parser CSSToken
+consumeAtKeyword = dropFirst <$> matchChar '@' <*> consumeIdentSequence
+    where dropFirst _ = AtKeywordToken
+
 parseString :: String -> (String, Either Error [CSSToken])
 parseString str = 
     let preProcessed = basics ++ preProcess str
@@ -374,7 +378,7 @@ parseString str =
                 <|> consumeCharacter ColonToken ':'
                 <|> consumeCharacter SemicolonToken ';'
                 <|> consume matchString CDOToken "<!--"
-                <|> AtKeywordToken <$> eatByStart ((:) <$> matchChar '@' <*> checkWouldStartIdentSequence) ((:) <$> matchChar '@' <*> consumeIdentSequence)
+                <|> eatByStart ((:) <$> matchChar '@' <*> checkWouldStartIdentSequence) consumeAtKeyword
                 <|> eatByStart matchEscape consumeIdentLike
                 <|> consumeCharacter OpeningSquareBracketToken '['
                 <|> consumeCharacter ClosingSquareBracketToken ']'
