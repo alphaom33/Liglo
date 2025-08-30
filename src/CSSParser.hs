@@ -26,7 +26,6 @@ data Combinator =
     DescendantCombinator
     | ChildCombinator
     | CurrentCombinator
-    | CurrendantCombinator
     deriving (Show, Eq)
 
 data Selector =
@@ -134,7 +133,7 @@ eatSquare (next : rest) = (next:) <$> eatSquare rest
 parseTokenList :: [[SelectorData]] -> [SelectorData] -> [ComponentValue] -> [[SelectorData]]
 parseTokenList _out _currentList _tokens = 
     let datas = go _out _currentList $ dropWhile (== WhitespaceToken) $ map (\ (PreservedValue p) -> p) _tokens
-    in map (\ ((_, a):rest) -> (CurrendantCombinator, a):rest) datas
+    in map (\ ((_, a):rest) -> (CurrentCombinator, a):rest) datas
     where
         go :: [[SelectorData]] -> [SelectorData] -> [CSSToken] -> [[SelectorData]]
         go out currentList [] = reverse $ if null currentList

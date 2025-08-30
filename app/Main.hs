@@ -57,7 +57,7 @@ main = do
     -- writeFile "asdf.html" asdf
     asdf <- readFile "asdf.html"
     let result = _emitted $ parseString asdf
-    --
+
     -- let styleLinks = linkStyleTags $ grabStylesheets result
     -- yankedStyles <- foldr (\ a b -> (++) <$> nomUrl finalURL a <*> b) (pure []) styleLinks
     --
@@ -73,6 +73,5 @@ main = do
 
     -- print outest
     -- putStr $ H.drawCSSTree outer
-    print outest
     Mortar.appIt outest Mortar.initialState
 

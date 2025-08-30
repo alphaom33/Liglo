@@ -1,3 +1,4 @@
+{-# LANGUAGE TupleSections #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE TemplateHaskell #-}
@@ -81,16 +82,13 @@ applyStyle (tag:tags) (Node ((combinator, selector), value) children) attribute 
     DescendantCombinator -> case go tags of
         (Just rest) -> toNext rest
         Nothing -> attribute
-    CurrendantCombinator -> case go $ tag:tags of
-        (Just rest) -> toNext rest
-        Nothing -> attribute
     where
         go [] = Nothing
         go (tag:tags) = if checkSelector tag selector
             then Just tags
             else go tags
 
-        toNext tags = foldr (applyStyle tags) (value . attribute) children
+        toNext tags = foldr (applyStyle tags) (attribute . value) children
 
 _buildHtml :: BuilderData -> BuilderData
 
@@ -245,14 +243,8 @@ buildCSSTree css = unfoldTree _buildCSSTree (blamCSS [] css)
 
 blamCSS :: [SelectorNode] -> [ComponentValue] -> (PreSelectorNode, [SelectorNode])
 blamCSS collapsed css = case css of
-    [] ->
-        let
-            (maybeStar, maybeStarless) = L.partition ((== [(CurrentCombinator, StarSelector)]) . fst) collapsed
-        in
-            if not $ null maybeStar
-                then (((CurrentCombinator, StarSelector), snd $ head maybeStar), maybeStarless)
-                else (((CurrentCombinator, StarSelector), []), collapsed)
-    (SimpleBlockValue (SimpleCurlyBlock (CurlyBlock ss ds)) : rest) -> blamCSS (map (\ s -> (s, ds)) ss ++ collapsed) rest
+    [] -> (((CurrentCombinator, StarSelector), []), collapsed)
+    (SimpleBlockValue (SimpleCurlyBlock (CurlyBlock ss ds)) : rest) -> blamCSS (map (, ds) ss ++ collapsed) rest
     (_:rest) -> blamCSS collapsed rest
 
 _buildCSSTree :: (PreSelectorNode, [SelectorNode]) -> ((SelectorData, CSSAttribute), [(PreSelectorNode, [SelectorNode])])
