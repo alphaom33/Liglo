@@ -1,0 +1,18 @@
+"position" -> case vs of
+    [PreservedValue (IdentToken "relative")] -> id
+    _ -> const Nothing
+"float" -> case vs of
+    [PreservedValue (IdentToken "none")] -> id
+    _ -> const Nothing
+"color" -> setColor vs Mortar.surroundForegroundColor
+"background" -> setColor vs Mortar.surroundBackgroundColor
+"background-color" -> setColor vs Mortar.surroundBackgroundColor
+"font-weight" -> case vs of
+    [PreservedValue (IdentToken "bold")] -> fmap Mortar.surroundBold
+"font-style" -> case vs of
+    [PreservedValue (IdentToken "italic")] -> fmap Mortar.surroundItalic
+    [PreservedValue (IdentToken "normal")] -> fmap (Mortar.resetItalic++)
+"text-decoration" -> case vs of
+    [PreservedValue (IdentToken "underline")] -> fmap Mortar.surroundUnderline
+    [PreservedValue (IdentToken "line-through")] -> fmap Mortar.surroundStrikethrough
+    [PreservedValue (IdentToken "none")] -> fmap ((Mortar.resetUnderline ++ Mortar.resetStrikethrough)++)

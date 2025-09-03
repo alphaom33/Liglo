@@ -37,41 +37,52 @@ import qualified CSSParser as CP
 import Mortar
 import StyleStealer
 
-main = do
-    -- args <- getArgs
-    -- let arged = map (\ c -> if c == ' ' then '+' else c) $ concat args
-    -- key <- lookupEnv "GOOGLE_API_KEY"
-    -- let apiKey = fromJust key
-    -- finalState <- defaultMain S.app $ S.initialState apiKey $ head args
-    --
-    -- when (S._curQuery finalState == head args) (do
-    --     print "exited forcefully"
-    --     exitSuccess)
-    --
-    -- let finalURL = S._curQuery finalState
-    -- writeFile "asdf.url" finalURL
-    --
-    -- a <- parseRequest finalURL
-    -- b <- httpLBS a
-    -- let asdf = unpack (getResponseBody b)
-    -- writeFile "asdf.html" asdf
+coolMain = do
+    args <- getArgs
+    let arged = map (\ c -> if c == ' ' then '+' else c) $ concat args
+    key <- lookupEnv "GOOGLE_API_KEY"
+    let apiKey = fromJust key
+    finalState <- defaultMain S.app $ S.initialState apiKey $ head args
+
+    when (S._curQuery finalState == head args) (do
+        print "exited forcefully"
+        exitSuccess)
+
+    let finalURL = S._curQuery finalState
+    writeFile "asdf.url" finalURL
+
+    a <- parseRequest finalURL
+    b <- httpLBS a
+    let asdf = unpack (getResponseBody b)
+    writeFile "asdf.html" asdf
+    let result = _emitted $ parseString asdf
+
+    let styleLinks = linkStyleTags $ grabStylesheets result
+    yankedStyles <- foldr (\ a b -> (++) <$> nomUrl finalURL a <*> b) (pure []) styleLinks
+
+    let styleInlines = takeStyles "" result
+
+    let str = yankedStyles ++ styleInlines
+    writeFile "asdf.css" str
+
+    let out = CT.parseString str
+    let outer = CP.parseList $ fromRight [] $ snd out
+    let outest = H.parseWebpage result outer
+
+    Mortar.appIt outest Mortar.initialState
+
+testMain = do
     asdf <- readFile "asdf.html"
     let result = _emitted $ parseString asdf
 
-    -- let styleLinks = linkStyleTags $ grabStylesheets result
-    -- yankedStyles <- foldr (\ a b -> (++) <$> nomUrl finalURL a <*> b) (pure []) styleLinks
-    --
-    -- let styleInlines = takeStyles "" result
-    --
-    -- let str = yankedStyles ++ styleInlines
-    -- writeFile "asdf.css" str
     str <- readFile "asdf.css"
 
     let out = CT.parseString str
     let outer = CP.parseList $ fromRight [] $ snd out
     let outest = H.parseWebpage result outer
 
-    -- print outest
+    -- writeFile "hm" outest
     -- putStr $ H.drawCSSTree outer
     Mortar.appIt outest Mortar.initialState
 
+main = testMain
