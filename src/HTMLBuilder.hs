@@ -260,6 +260,8 @@ parseDecleretiens ds out = case ds of
     [] -> out
     (nextDeclaration : rest) -> parseDecleretiens rest $ case nextDeclaration of
         (DeclarationValue (Declaration n vs _)) -> out . case n of
+            "display" -> case vs of
+                [PreservedValue (IdentToken "none")] -> set real False
             "position" -> case vs of
                 [PreservedValue (IdentToken "relative")] -> set real True
                 _ -> set real False

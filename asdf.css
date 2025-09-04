@@ -1,6 +1,9 @@
-a[href]:hover, a[href]:focus {
+.class1 {
+    /*two channels > 63, other > 9*/
     color:#0a6464;
 }
-.subNav {
-    float:left;
+
+.class2 {
+    /*some attribute which discards characters*/
+    display: none;
 }

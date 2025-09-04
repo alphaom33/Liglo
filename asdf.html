@@ -1,8 +1,15 @@
-<div class="subNav">
-    <a href=""></a>
-    <a href=""></a>
-    <a href=""></a>
-</div>
-<a href="">aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa</a><br>
-<a href="">aaaaaaaaaaaaaaaaaaaaa</a>
-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa<br>
+<!--at least three matching both class1 and class2-->
+<anytag class="class1 class2"></anytag>
+<anytag class="class1 class2"></anytag>
+<anytag class="class1 class2"></anytag>
+<!--one matching only class1 and containing at least 38 characters-->
+<anytag class="class1">aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa</anytag>
+<!--one level of nesting-->
+<anytag>
+    <!--one matching only class1 and containing at least 18 characters-->
+    <anytag class="class1">aaaaaaaaaaaaaaaaaaaaa</anytag>
+    <!--at least 98 characters-->
+    aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    <!--another level of nesting-->
+    <anytag></anytag>
+</anytag>
