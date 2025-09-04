@@ -40,9 +40,9 @@ initialState = State {
 }
 
 getEscapeSequence :: [Char] -> [Char]
-getEscapeSequence str = '\x1b' : '[' : str
+getEscapeSequence str = '\ESC' : '[' : str
 putEscapeSequence :: [Char] -> IO ()
-putEscapeSequence str = putStr $ '\x1b' : '[' : str
+putEscapeSequence str = putStr $ '\ESC' : '[' : str
 
 hideCursor :: IO ()
 hideCursor = putEscapeSequence "?25l"
@@ -107,7 +107,7 @@ getResetAttrs = getEscapeSequence "0m"
 removeEscapes :: [Char] -> [Char]
 removeEscapes str =
     let 
-        index = List.elemIndex '\x1b' str
+        index = List.elemIndex '\ESC' str
         (before, rest) = splitAt (fromJust index) str
         (_, _:after) = splitAt (fromJust $ List.elemIndex 'm' rest) rest
     in case index of

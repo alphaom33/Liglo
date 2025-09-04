@@ -151,7 +151,7 @@ _buildHtml mhm = case _toRead mhm of
             applyStateElement new = case new of
                 (0, CheckedColor (r, g, b)) -> putText $ Mortar.setForegroundColor r g b
 
-                (1, CheckedMaybe Nothing) -> putText $ Mortar.resetBackground
+                (1, CheckedMaybe Nothing) -> putText Mortar.resetBackground
                 (1, CheckedMaybe (Just (r, g, b))) -> putText $ Mortar.setBackgroundColor r g b
 
                 (2, CheckedBool True) -> putText Mortar.bold
@@ -183,7 +183,7 @@ _buildHtml mhm = case _toRead mhm of
             go
                 | _discard mhm' = id
                 | c `elem` " \n\t" && fmap _tagName (_openTags mhm' L.!? 0) /= Just "pre" = killWhitespace
-                | not (null (_openTags mhm)) && null (["head", "meta", "link", "script", "style", "select"] `L.intersect` map _tagName (_openTags mhm)) = over out (++[c]) . set lined False
+                | not (null (_openTags mhm)) && null (["head", "meta", "link", "script", "style", "select"] `L.intersect` map _tagName (_openTags mhm)) = over out (c:) . set lined False
                 | otherwise = id
 
     (_:_) -> _buildHtml mhm'
@@ -192,14 +192,15 @@ _buildHtml mhm = case _toRead mhm of
     where
         mhm' = over toRead (drop 1) mhm
 
-        putText text = over out (++text)
-
         appendHbox = set lined True . putText "\n"
+
+putText :: [Char] -> BuilderData -> BuilderData
+putText text = over out (reverse text++)
 
 killWhitespace :: BuilderData -> BuilderData
 killWhitespace mhm = _killWhitespace $ (if _lined mhm
     then id
-    else over out (++" ")) mhm
+    else over out (' ':)) mhm
 
 _killWhitespace :: BuilderData -> BuilderData
 _killWhitespace mhm = case next of
@@ -319,7 +320,7 @@ countCSSTree num tree = case subForest tree of
     _ -> foldr ((+) . countCSSTree 0) num (subForest tree)
 
 parseWebpage :: [Token] -> [ComponentValue] -> String
-parseWebpage emittedTokens css = _out $ _buildHtml $ builderData emittedTokens $ buildCSSTree css
+parseWebpage emittedTokens css = reverse $ _out $ _buildHtml $ builderData emittedTokens $ buildCSSTree css
 
 drawCSSTree :: [ComponentValue] -> String
 drawCSSTree css = drawTree $ show . fst <$> buildCSSTree css
