@@ -1,5 +1,10 @@
 .class1 {
     /*two channels > 63, other > 9*/
+    /*cannot be #fff*/
+    /*ex:
+        #64640a, #65640a, #fffffe all trigger
+        #63640a, #646409, #ffffff do not
+    */
     color:#0a6464;
 }
 
