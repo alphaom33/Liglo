@@ -39,7 +39,7 @@ data TextState = TextState {
     , _underlined :: Bool
     , _struckthrough :: Bool
     , _real :: Bool
-} deriving Show
+} deriving (Eq, Show)
 $(makeLenses ''TextState)
 
 data CheckedTextState =
@@ -59,6 +59,7 @@ data BuilderData = BuilderData {
     _toRead :: [Token]
     , _openTags :: [Tag]
     , _openStyles :: [TextState]
+    , _currentStyle :: TextState
     , _out :: String
     , _style :: Tree (SelectorData, CSSAttribute)
     , _lined :: Bool
@@ -70,7 +71,7 @@ textState :: TextState
 textState = TextState {_foregroundColor=(255, 255, 255), _backgroundColor=Nothing, _bold=False, _italicized=False, _underlined=False, _struckthrough=False, _real=True}
 
 builderData :: [Token] -> Tree (SelectorData, CSSAttribute) -> BuilderData
-builderData emittedTokens p_style = BuilderData {_openTags=[], _openStyles=[textState], _toRead=emittedTokens, _out=[], _style=p_style, _lined=True, _discard=False}
+builderData emittedTokens p_style = BuilderData {_openTags=[], _openStyles=[textState], _currentStyle=textState, _toRead=emittedTokens, _out=[], _style=p_style, _lined=True, _discard=False}
 
 makeWidget :: BuilderData -> TextState
 makeWidget mhm = applyStyle (_openTags mhm) (_style mhm) id (head $ _openStyles mhm)
@@ -139,52 +140,21 @@ _buildHtml mhm = case _toRead mhm of
                 . endings (head $ _openTags mhm'')
                 $ mhm''
 
-            addStyle state =
-                let 
-                    newTextState = makeWidget state
-                in
-                    over openStyles (newTextState:)
-                    . applyStateDiff (head $ _openStyles state) newTextState
-                    $ state
-
-            applyStateDiff oldState newState state = foldr (\ (old, new) b -> if old == new then b else applyStateElement new b) state $ zip (toChecked oldState) (toChecked newState)
-            applyStateElement new = case new of
-                (0, CheckedColor (r, g, b)) -> putText $ Mortar.setForegroundColor r g b
-
-                (1, CheckedMaybe Nothing) -> putText Mortar.resetBackground
-                (1, CheckedMaybe (Just (r, g, b))) -> putText $ Mortar.setBackgroundColor r g b
-
-                (2, CheckedBool True) -> putText Mortar.bold
-                (2, CheckedBool False) -> putText Mortar.resetBold
-
-                (3, CheckedBool True) -> putText Mortar.italic
-                (3, CheckedBool False) -> putText Mortar.resetItalic
-
-                (4, CheckedBool True) -> putText Mortar.underline
-                (4, CheckedBool False) -> putText Mortar.resetUnderline
-
-                (5, CheckedBool True) -> putText Mortar.strikethrough
-                (5, CheckedBool False) -> putText Mortar.resetStrikethrough
-
-                (6, CheckedBool b) -> set discard $ not b
+            addStyle state = over openStyles (makeWidget state:) state
 
             endings tag state = (if _tagName tag `elem` ["li", "h1", "h2", "h3", "h4", "h5", "h6", "p", "pre", "div"] && not (_discard state)
                 then appendHbox
-                else id) state'
-                where
-                    (oldState : rest) = _openStyles state
-                    state' = 
-                        set openStyles rest
-                        . applyStateDiff oldState (head rest)
-                        $ state
+                else id) $ over openStyles (drop 1) state
                     
-    (Character c:_) -> _buildHtml $ go mhm'
-        where
-            go
-                | _discard mhm' = id
-                | c `elem` " \n\t" && fmap _tagName (_openTags mhm' L.!? 0) /= Just "pre" = killWhitespace
-                | not (null (_openTags mhm)) && null (["head", "meta", "link", "script", "style", "select"] `L.intersect` map _tagName (_openTags mhm)) = over out (c:) . set lined False
-                | otherwise = id
+    (Character c:_) -> _buildHtml $ (if
+        | _discard mhm' -> id
+        | c `elem` " \n\t" && fmap _tagName (_openTags mhm' L.!? 0) /= Just "pre" -> killWhitespace
+        | not (null (_openTags mhm)) && null (["head", "meta", "link", "script", "style", "select"] `L.intersect` map _tagName (_openTags mhm)) -> over out (c:) . set lined False
+        | otherwise -> id)
+        . (if _currentStyle mhm' == head (_openStyles mhm')
+            then id
+            else applyStateDiff)
+        $ mhm'
 
     (_:_) -> _buildHtml mhm'
 
@@ -193,6 +163,33 @@ _buildHtml mhm = case _toRead mhm of
         mhm' = over toRead (drop 1) mhm
 
         appendHbox = set lined True . putText "\n"
+
+        applyStateDiff state = foldr (\ (old, new) b -> if old == new then b else applyStateElement new b) state' $ zip (toChecked oldStyle) (toChecked newStyle)
+            where
+                oldStyle = _currentStyle state
+                newStyle = head $ _openStyles state
+                state' = set currentStyle newStyle state
+
+        applyStateElement new = case new of
+            (0, CheckedColor (r, g, b)) -> putText $ Mortar.setForegroundColor r g b
+
+            (1, CheckedMaybe Nothing) -> putText Mortar.resetBackground
+            (1, CheckedMaybe (Just (r, g, b))) -> putText $ Mortar.setBackgroundColor r g b
+
+            (2, CheckedBool True) -> putText Mortar.bold
+            (2, CheckedBool False) -> putText Mortar.resetBold
+
+            (3, CheckedBool True) -> putText Mortar.italic
+            (3, CheckedBool False) -> putText Mortar.resetItalic
+
+            (4, CheckedBool True) -> putText Mortar.underline
+            (4, CheckedBool False) -> putText Mortar.resetUnderline
+
+            (5, CheckedBool True) -> putText Mortar.strikethrough
+            (5, CheckedBool False) -> putText Mortar.resetStrikethrough
+
+            (6, CheckedBool b) -> set discard $ not b
+
 
 putText :: [Char] -> BuilderData -> BuilderData
 putText text = over out (reverse text++)
@@ -260,8 +257,7 @@ parseDecleretiens ds out = case ds of
     [] -> out
     (nextDeclaration : rest) -> parseDecleretiens rest $ case nextDeclaration of
         (DeclarationValue (Declaration n vs _)) -> out . case n of
-            "display" -> case vs of
-                [PreservedValue (IdentToken "none")] -> set real False
+            "display" -> set real False
             "position" -> case vs of
                 [PreservedValue (IdentToken "relative")] -> set real True
                 _ -> set real False
