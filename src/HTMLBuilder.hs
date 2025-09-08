@@ -31,6 +31,11 @@ instance Show CSSAttribute where
 type PreSelectorNode = (SelectorData, [ComponentValue])
 type SelectorNode = ([SelectorData], [ComponentValue])
 
+data DisplayType =
+    Inline
+    | Block
+    deriving (Show, Eq)
+
 data TextState = TextState {
     _foregroundColor :: (Int, Int, Int)
     , _backgroundColor :: Maybe (Int, Int, Int)
@@ -39,6 +44,7 @@ data TextState = TextState {
     , _underlined :: Bool
     , _struckthrough :: Bool
     , _real :: Bool
+    , _display :: DisplayType
 } deriving (Eq, Show)
 $(makeLenses ''TextState)
 
@@ -68,7 +74,7 @@ data BuilderData = BuilderData {
 $(makeLenses ''BuilderData)
 
 textState :: TextState
-textState = TextState {_foregroundColor=(255, 255, 255), _backgroundColor=Nothing, _bold=False, _italicized=False, _underlined=False, _struckthrough=False, _real=True}
+textState = TextState {_foregroundColor=(0, 0, 0), _backgroundColor=Just (254, 255, 255), _bold=False, _italicized=False, _underlined=False, _struckthrough=False, _real=True, _display=Block}
 
 builderData :: [Token] -> Tree (SelectorData, CSSAttribute) -> BuilderData
 builderData emittedTokens p_style = BuilderData {_openTags=[], _openStyles=[textState], _currentStyle=textState, _toRead=emittedTokens, _out=[], _style=p_style, _lined=True, _discard=False}
@@ -142,18 +148,22 @@ _buildHtml mhm = case _toRead mhm of
 
             addStyle state = over openStyles (makeWidget state:) state
 
-            endings tag state = (if _tagName tag `elem` ["li", "h1", "h2", "h3", "h4", "h5", "h6", "p", "pre", "div"] && not (_discard state)
-                then appendHbox
-                else id) $ over openStyles (drop 1) state
+            endings tag state = 
+                applyStateDiff
+                . over openStyles (drop 1) 
+                . (if _display (_currentStyle state) == Block && _tagName tag `elem` ["li", "h1", "h2", "h3", "h4", "h5", "h6", "p", "pre", "div"] && not (_discard state)
+                    then appendHbox
+                    else id) 
+                $ state
                     
-    (Character c:_) -> _buildHtml $ (if
-        | _discard mhm' -> id
-        | c `elem` " \n\t" && fmap _tagName (_openTags mhm' L.!? 0) /= Just "pre" -> killWhitespace
-        | not (null (_openTags mhm)) && null (["head", "meta", "link", "script", "style", "select"] `L.intersect` map _tagName (_openTags mhm)) -> over out (c:) . set lined False
-        | otherwise -> id)
-        . (if _currentStyle mhm' == head (_openStyles mhm')
-            then id
-            else applyStateDiff)
+    (Character c:_) -> 
+        _buildHtml 
+        . (if
+            | _discard mhm' -> id
+            | c `elem` " \n\t" && fmap _tagName (_openTags mhm' L.!? 0) /= Just "pre" -> killWhitespace
+            | not (null (_openTags mhm)) && null (["head", "meta", "link", "script", "style", "select"] `L.intersect` map _tagName (_openTags mhm)) -> over out (c:) . set lined False
+            | otherwise -> id)
+        . applyStateDiff
         $ mhm'
 
     (_:_) -> _buildHtml mhm'
@@ -257,7 +267,13 @@ parseDecleretiens ds out = case ds of
     [] -> out
     (nextDeclaration : rest) -> parseDecleretiens rest $ case nextDeclaration of
         (DeclarationValue (Declaration n vs _)) -> out . case n of
-            "display" -> set real False
+            "display" -> case vs of
+                [PreservedValue (IdentToken "block")] -> set display Block
+                [PreservedValue (IdentToken "inline")] -> set display Inline
+                [PreservedValue (IdentToken "inline-block")] -> set display Inline
+                [PreservedValue (IdentToken "inline-table")] -> set display Inline
+                [PreservedValue (IdentToken "none")] -> set real False
+                _ -> id
             "position" -> case vs of
                 [PreservedValue (IdentToken "relative")] -> set real True
                 _ -> set real False

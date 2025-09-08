@@ -133,14 +133,14 @@ eatSquare (next : rest) = (next:) <$> eatSquare rest
 parseTokenList :: [[SelectorData]] -> [SelectorData] -> [ComponentValue] -> [[SelectorData]]
 parseTokenList _out _currentList _tokens = 
     let datas = go _out _currentList $ dropWhile (== WhitespaceToken) $ map (\ (PreservedValue p) -> p) _tokens
-    in map (\ ((_, a):rest) -> (CurrentCombinator, a):rest) datas
+    in map (\ ((_, a):rest) -> (CurrentCombinator, a):rest) $ filter (not . null) datas
     where
         go :: [[SelectorData]] -> [SelectorData] -> [CSSToken] -> [[SelectorData]]
         go out currentList [] = reverse $ if null currentList
             then out
             else currentList : out
 
-        go out currentList (ColonToken : IdentToken _ : tokens) = go out currentList tokens
+        go out currentList (ColonToken : IdentToken _ : tokens) = go out (drop 1 currentList) tokens
         go out currentList (ColonToken : ColonToken : IdentToken _ : tokens) = go out currentList tokens
 
         go out currentList (next : tokens) = case next of

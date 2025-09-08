@@ -85,5 +85,5 @@ testMain = do
     -- putStr $ H.drawCSSTree outer
     Mortar.appIt outest Mortar.initialState
 
-main = testMain
+main = coolMain
 
