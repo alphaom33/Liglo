@@ -74,7 +74,7 @@ data BuilderData = BuilderData {
 $(makeLenses ''BuilderData)
 
 textState :: TextState
-textState = TextState {_foregroundColor=(0, 0, 0), _backgroundColor=Just (254, 255, 255), _bold=False, _italicized=False, _underlined=False, _struckthrough=False, _real=True, _display=Block}
+textState = TextState {_foregroundColor=(255, 255, 255), _backgroundColor=Nothing, _bold=False, _italicized=False, _underlined=False, _struckthrough=False, _real=True, _display=Block}
 
 builderData :: [Token] -> Tree (SelectorData, CSSAttribute) -> BuilderData
 builderData emittedTokens p_style = BuilderData {_openTags=[], _openStyles=[textState], _currentStyle=textState, _toRead=emittedTokens, _out=[], _style=p_style, _lined=True, _discard=False}
@@ -95,6 +95,7 @@ checkSelector tag selector = case selector of
         in elem n classes
     (AttrSelector a c) -> c (getAttrValue <$> getAttr tag a)
     (StateSelector _ _) -> False
+    (NotSelector c) -> not $ checkSelector tag c
 
 getAttrJust :: Tag -> String -> String
 getAttrJust tag = maybe "" getAttrValue . getAttr tag

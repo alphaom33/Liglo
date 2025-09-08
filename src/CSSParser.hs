@@ -35,6 +35,7 @@ data Selector =
     | StateSelector String String
     | StarSelector
     | AttrSelector String AttrNess
+    | NotSelector Selector
     deriving (Show, Eq)
 
 data CurlyBlock = CurlyBlock [[SelectorData]] [ComponentValue] deriving (Show, Eq)
@@ -94,7 +95,7 @@ consumeComponentValue = go []
             OpeningCurlyBracketToken -> consumeSimpleBlock (reverse tokens) state
             -- OpeningSquareBracketToken -> consumeSimpleBlock (reverse tokens) state
             OpeningParenthesisToken -> consumeSimpleBlock (reverse tokens) state
-            (FunctionToken _) -> consumeFunction state
+            -- (FunctionToken _) -> consumeFunction state
             (AtKeywordToken _) -> consumeAtRule state
             _ -> if nextnextInputToken == EOFToken
                 then (PreservedValue nextInputToken, state')
@@ -140,6 +141,7 @@ parseTokenList _out _currentList _tokens =
             then out
             else currentList : out
 
+
         go out currentList (ColonToken : IdentToken _ : tokens) = go out (drop 1 currentList) tokens
         go out currentList (ColonToken : ColonToken : IdentToken _ : tokens) = go out currentList tokens
 
@@ -161,6 +163,17 @@ parseTokenList _out _currentList _tokens =
             (WhitespaceToken : rest) -> matchSelector rest
 
             (DelimToken '*' : rest) -> (StarSelector, rest)
+
+            -- TODO I think a bit ugly
+            (ColonToken : FunctionToken "not" : tokens) -> (yep, adjustedRest)
+                where
+                    arguments = takeWhile (/= ClosingParenthesisToken) tokens
+                    argumentList = filter (not . (`elem` [WhitespaceToken, CommaToken])) arguments
+                    (yep:selected) = map (NotSelector . tokenToSelector) argumentList
+                    (_:rest) = dropWhile (not . (`elem` [CommaToken, ClosingParenthesisToken])) tokens
+                    adjustedRest = if null selected 
+                        then drop 1 $ dropWhile (/= ClosingParenthesisToken) rest
+                        else ColonToken:FunctionToken "not":rest
 
             (OpeningSquareBracketToken : IdentToken attr : rest) -> case square of
                 (DelimToken '=' : rest'') -> getAttrSelector (==) rest''
