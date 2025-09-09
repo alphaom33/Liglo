@@ -96,6 +96,7 @@ checkSelector tag selector = case selector of
     (AttrSelector a c) -> c (getAttrValue <$> getAttr tag a)
     (StateSelector _ _) -> False
     (NotSelector c) -> not $ checkSelector tag c
+    (OrSelector c) -> any (checkSelector tag) c
 
 getAttrJust :: Tag -> String -> String
 getAttrJust tag = maybe "" getAttrValue . getAttr tag
@@ -119,7 +120,7 @@ applyStyle (tag:tags) (Node ((combinator, selector), value) children) attribute 
     where
         go [] = Nothing
         go (tag:tags) = if checkSelector tag selector
-            then Just tags
+            then Just (tag:tags)
             else go tags
 
         toNext tags = foldr (applyStyle tags) (attribute . value) children

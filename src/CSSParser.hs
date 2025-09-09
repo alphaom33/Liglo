@@ -36,6 +36,7 @@ data Selector =
     | StarSelector
     | AttrSelector String AttrNess
     | NotSelector Selector
+    | OrSelector [Selector]
     deriving (Show, Eq)
 
 data CurlyBlock = CurlyBlock [[SelectorData]] [ComponentValue] deriving (Show, Eq)
@@ -134,7 +135,7 @@ eatSquare (next : rest) = (next:) <$> eatSquare rest
 parseTokenList :: [[SelectorData]] -> [SelectorData] -> [ComponentValue] -> [[SelectorData]]
 parseTokenList _out _currentList _tokens = 
     let datas = go _out _currentList $ dropWhile (== WhitespaceToken) $ map (\ (PreservedValue p) -> p) _tokens
-    in map (\ ((_, a):rest) -> (CurrentCombinator, a):rest) $ filter (not . null) datas
+    in datas
     where
         go :: [[SelectorData]] -> [SelectorData] -> [CSSToken] -> [[SelectorData]]
         go out currentList [] = reverse $ if null currentList
@@ -151,12 +152,19 @@ parseTokenList _out _currentList _tokens =
             where
                 onward css = 
                     let 
-                        (combinator, rest) = matchCombinator css
-                        (selector, rest') = matchSelector rest
+                        (selector, rest) = matchSelector css
+                        (combinator, rest') = matchCombinator rest
                     in if null rest
                         then go out currentList rest
                         else go out ((combinator, selector) : currentList) rest'
                 addCurrentList = reverse currentList : out
+
+        getFunction tokens = (yep, rest)
+            where
+                arguments = takeWhile (/= ClosingParenthesisToken) tokens
+                argumentList = filter (not . (`elem` [WhitespaceToken, CommaToken])) arguments
+                yep = map tokenToSelector argumentList
+                (_:rest) = dropWhile (/= ClosingParenthesisToken) tokens
 
         matchSelector :: [CSSToken] -> (Selector, [CSSToken])
         matchSelector css = case css of
@@ -164,16 +172,18 @@ parseTokenList _out _currentList _tokens =
 
             (DelimToken '*' : rest) -> (StarSelector, rest)
 
-            -- TODO I think a bit ugly
-            (ColonToken : FunctionToken "not" : tokens) -> (yep, adjustedRest)
-                where
-                    arguments = takeWhile (/= ClosingParenthesisToken) tokens
-                    argumentList = filter (not . (`elem` [WhitespaceToken, CommaToken])) arguments
-                    (yep:selected) = map (NotSelector . tokenToSelector) argumentList
-                    (_:rest) = dropWhile (not . (`elem` [CommaToken, ClosingParenthesisToken])) tokens
-                    adjustedRest = if null selected 
-                        then drop 1 $ dropWhile (/= ClosingParenthesisToken) rest
-                        else ColonToken:FunctionToken "not":rest
+            (ColonToken : FunctionToken "where" : tokens) -> 
+                let (yep, rest) = getFunction tokens
+                in (OrSelector yep, rest)
+
+            -- TODO is should add specificity
+            (ColonToken : FunctionToken "is" : tokens) -> 
+                let (yep, rest) = getFunction tokens
+                in (OrSelector yep, rest)
+
+            (ColonToken : FunctionToken "not" : tokens) -> 
+                let (yep, rest) = getFunction tokens
+                in (NotSelector $ OrSelector yep, rest)
 
             (OpeningSquareBracketToken : IdentToken attr : rest) -> case square of
                 (DelimToken '=' : rest'') -> getAttrSelector (==) rest''

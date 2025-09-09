@@ -1,3 +1,3 @@
-:not(.level, a) {
+a > b > c.a {
     color: blue;
 }
