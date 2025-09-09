@@ -160,13 +160,15 @@ _buildHtml mhm = case _toRead mhm of
                     
     (Character c:_) -> 
         _buildHtml 
-        . (if
-            | _discard mhm' -> id
-            | c `elem` " \n\t" && fmap _tagName (_openTags mhm' L.!? 0) /= Just "pre" -> killWhitespace
-            | not (null (_openTags mhm)) && null (["head", "meta", "link", "script", "style", "select"] `L.intersect` map _tagName (_openTags mhm)) -> over out (c:) . set lined False
-            | otherwise -> id)
+        . doCharacter
         . applyStateDiff
         $ mhm'
+        where
+            doCharacter mhm
+                | _discard mhm = mhm
+                | c `elem` " \n\t" && fmap _tagName (_openTags mhm' L.!? 0) /= Just "pre" = killWhitespace mhm
+                | not (null (_openTags mhm)) && null (["head", "meta", "link", "script", "style", "select"] `L.intersect` map _tagName (_openTags mhm)) = over out (c:) . set lined False $ mhm
+                | otherwise = mhm
 
     (_:_) -> _buildHtml mhm'
 
@@ -268,7 +270,7 @@ parseDecleretiens :: [ComponentValue] -> CSSAttribute -> CSSAttribute
 parseDecleretiens ds out = case ds of
     [] -> out
     (nextDeclaration : rest) -> parseDecleretiens rest $ case nextDeclaration of
-        (DeclarationValue (Declaration n vs _)) -> out . case n of
+        (DeclarationValue (Declaration n vs _)) -> case n of
             "display" -> case vs of
                 [PreservedValue (IdentToken "block")] -> set display Block
                 [PreservedValue (IdentToken "inline")] -> set display Inline

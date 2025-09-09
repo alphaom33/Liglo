@@ -1,3 +1,7 @@
-a > b > c.a {
+div a {
     color: blue;
+}
+
+a {
+    color: brown;
 }

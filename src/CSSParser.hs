@@ -146,17 +146,18 @@ parseTokenList _out _currentList _tokens =
         go out currentList (ColonToken : IdentToken _ : tokens) = go out (drop 1 currentList) tokens
         go out currentList (ColonToken : ColonToken : IdentToken _ : tokens) = go out currentList tokens
 
+        go out currentList [WhitespaceToken] = go out currentList []
+
         go out currentList (next : tokens) = case next of
             CommaToken -> go addCurrentList [] tokens
             _ -> onward (next:tokens)
             where
-                onward css = 
-                    let 
+                onward css =
+                    let
                         (selector, rest) = matchSelector css
                         (combinator, rest') = matchCombinator rest
-                    in if null rest
-                        then go out currentList rest
-                        else go out ((combinator, selector) : currentList) rest'
+                    in 
+                        go out ((combinator, selector) : currentList) rest'
                 addCurrentList = reverse currentList : out
 
         getFunction tokens = (yep, rest)

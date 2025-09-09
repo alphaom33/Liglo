@@ -9,6 +9,7 @@ import HTMLParser
 import Network.HTTP.Client
 import Network.HTTP.Simple
 import Data.ByteString.Lazy.Char8 (unpack)
+import Data.List.Split (splitOn)
 
 getAttr t name = filter (\ (Attribute (n, _)) -> n == name) (_attrs t) L.!? 0
 
@@ -21,6 +22,7 @@ grabStylesheets = filter (\case
             Nothing -> False
             (Just (Attribute (_, v))) -> v == str
 
+linkStyleTags :: [Token] -> [String]
 linkStyleTags = map $ \case
     (TagToken t) -> case getAttr t "href" of
         (Just (Attribute (_, v))) -> v
@@ -31,15 +33,21 @@ nomUrl startUrl url = do
     b <- httpLBS a
     pure $ unpack $ getResponseBody b
 
-resolveUrl startUrl url = case url of
+resolveUrl :: [Char] -> [Char] -> [Char]
+resolveUrl _startUrl url = case url of
     ('.':'.':'/':rest) -> _resolveUrl (killSlash $ killSlash startUrl) rest
     _ -> startUrl ++ '/':url
+    where
+        startUrl = head $ splitOn "?" _startUrl
 
+_resolveUrl :: [Char] -> [Char] -> [Char]
 _resolveUrl startUrl url = case url of
     ('.':'.':'/':rest) -> _resolveUrl (killSlash startUrl) rest
     _ -> startUrl ++ '/':url
 
+killSlash :: [Char] -> [Char]
 killSlash = reverse . _killSlash . reverse
+_killSlash :: [Char] -> [Char]
 _killSlash str = case str of
     [] -> str
     ('/':rest) -> rest
