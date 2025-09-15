@@ -123,7 +123,7 @@ applyStyle (tag:tags) (Node ((combinator, selector), value) children) attribute 
             then Just (tag:tags)
             else go tags
 
-        toNext tags = foldr (applyStyle tags) (attribute . value) children
+        toNext tags = foldr (applyStyle tags) (value . attribute) children
 
 _buildHtml :: BuilderData -> BuilderData
 

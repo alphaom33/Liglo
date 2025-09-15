@@ -133,9 +133,7 @@ eatSquare (WhitespaceToken : rest) = eatSquare rest
 eatSquare (next : rest) = (next:) <$> eatSquare rest
 
 parseTokenList :: [[SelectorData]] -> [SelectorData] -> [ComponentValue] -> [[SelectorData]]
-parseTokenList _out _currentList _tokens = 
-    let datas = go _out _currentList $ dropWhile (== WhitespaceToken) $ map (\ (PreservedValue p) -> p) _tokens
-    in datas
+parseTokenList _out _currentList _tokens = go _out _currentList $ dropWhile (== WhitespaceToken) $ map (\ (PreservedValue p) -> p) _tokens
     where
         go :: [[SelectorData]] -> [SelectorData] -> [CSSToken] -> [[SelectorData]]
         go out currentList [] = reverse $ if null currentList
@@ -185,6 +183,11 @@ parseTokenList _out _currentList _tokens =
             (ColonToken : FunctionToken "not" : tokens) -> 
                 let (yep, rest) = getFunction tokens
                 in (NotSelector $ OrSelector yep, rest)
+
+            -- TODO um no
+            (ColonToken : FunctionToken _ : tokens) ->
+                let (_, rest) = getFunction tokens
+                in (NotSelector StarSelector, rest)
 
             (OpeningSquareBracketToken : IdentToken attr : rest) -> case square of
                 (DelimToken '=' : rest'') -> getAttrSelector (==) rest''
@@ -262,11 +265,11 @@ consumeSimpleBlock tokens (startingToken:s) =
 consumeAtRule :: [CSSToken] -> (ComponentValue, [CSSToken])
 consumeAtRule ((AtKeywordToken name):s) = go [] s
     where
-        go prelude state = case nextInputToken of
+        go prelude state = case tracer nextInputToken of
             SemicolonToken -> (attish Nothing, state')
             EOFToken -> (attish Nothing, state)
             OpeningCurlyBracketToken -> let (SimpleBlockValue (SimpleCurlyBlock val), state'') = consumeSimpleBlock [] state in (attish (Just val), state'')
-            _ -> let (val, state'') = consumeComponentValue state in go (val:prelude) state''
+            _ -> go prelude state'
             where
                 attish block = RuleValue AtRule {atName=name, atPrelude=prelude, atBlock=block}
                 (nextInputToken:state') = state

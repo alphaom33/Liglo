@@ -38,17 +38,17 @@ import Mortar
 import StyleStealer
 
 coolMain = do
-    -- args <- getArgs
-    -- let arged = map (\ c -> if c == ' ' then '+' else c) $ concat args
-    -- key <- lookupEnv "GOOGLE_API_KEY"
-    -- let apiKey = fromJust key
-    -- finalState <- defaultMain S.app $ S.initialState apiKey $ head args
-    --
-    -- when (S._curQuery finalState == head args) (do
-    --     print "exited forcefully"
-    --     exitSuccess)
-    --
-    let finalURL = "https://hoogle.haskell.org?hoogle=map"--S._curQuery finalState
+    args <- getArgs
+    let arged = map (\ c -> if c == ' ' then '+' else c) $ concat args
+    key <- lookupEnv "GOOGLE_API_KEY"
+    let apiKey = fromJust key
+    finalState <- defaultMain S.app $ S.initialState apiKey $ head args
+
+    when (S._curQuery finalState == head args) (do
+        print "exited forcefully"
+        exitSuccess)
+
+    let finalURL = S._curQuery finalState
     writeFile "asdf.url" finalURL
 
     a <- parseRequest finalURL
@@ -81,7 +81,7 @@ testMain = do
     let outer = CP.parseList $ fromRight [] $ snd out
     let outest = H.parseWebpage result outer
 
-    print outest
+    -- print outest
     -- putStr $ H.drawCSSTree outer
     Mortar.appIt outest Mortar.initialState
 
