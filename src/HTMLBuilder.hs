@@ -80,7 +80,7 @@ builderData :: [Token] -> Tree (SelectorData, CSSAttribute) -> BuilderData
 builderData emittedTokens p_style = BuilderData {_openTags=[], _openStyles=[textState], _currentStyle=textState, _toRead=emittedTokens, _out=[], _style=p_style, _lined=True, _discard=False}
 
 makeWidget :: BuilderData -> TextState
-makeWidget mhm = applyStyle (_openTags mhm) (_style mhm) id (head $ _openStyles mhm)
+makeWidget mhm = applyStyle (_openTags mhm) (_style mhm) (head $ _openStyles mhm)
 
 getAttr :: Tag -> String -> Maybe Attribute
 getAttr t name = filter (\ (Attribute (n, _)) -> n == name) (_attrs t) L.!? 0
@@ -103,28 +103,39 @@ getAttrJust tag = maybe "" getAttrValue . getAttr tag
 getAttrValue :: Attribute -> String
 getAttrValue (Attribute (_, v)) = v
 
-applyStyle :: [Tag] -> Tree (SelectorData, CSSAttribute) -> CSSAttribute -> CSSAttribute
-applyStyle [] _ attribute = attribute
-applyStyle (tag:tags) (Node ((combinator, selector), value) children) attribute = case combinator of
-    CurrentCombinator -> if checkSelector tag selector
-        then toNext (tag:tags)
-        else attribute
-    ChildCombinator -> if null tags
-        then attribute
-        else if checkSelector (head tags) selector
-            then toNext tags
-            else attribute
-    DescendantCombinator -> case go tags of
-        (Just rest) -> toNext rest
-        Nothing -> attribute
+applyStyle :: [Tag] -> Tree (SelectorData, CSSAttribute) -> CSSAttribute
+applyStyle ts (Node _ c) = go (map ((,) ts) c)
     where
-        go [] = Nothing
-        go (tag:tags) = if checkSelector tag selector
-            then Just (tag:tags)
-            else go tags
+        go cs = case foldr doChildren (id, []) cs of
+            (val, []) -> val
+            (val, a) -> go a . val
 
-        toNext tags = foldr (applyStyle tags) (value . attribute) children
-
+        doChildren (tag:tags, Node ((combinator, selector), value) children) (val, out) = case combinator of
+            CurrentCombinator -> if checkSelector tag selector
+                then (value . val, map ((,) (tag:tags)) children ++ out)
+                else (val, out)
+-- applyStyle :: [Tag] -> Tree (SelectorData, CSSAttribute) -> CSSAttribute -> CSSAttribute
+-- applyStyle [] _ attribute = attribute
+-- applyStyle (tag:tags) (Node ((combinator, selector), value) children) attribute = case combinator of
+--     CurrentCombinator -> if checkSelector tag selector
+--         then toNext (tag:tags)
+--         else attribute
+--     ChildCombinator -> if null tags
+--         then attribute
+--         else if checkSelector (head tags) selector
+--             then toNext tags
+--             else attribute
+--     DescendantCombinator -> case go tags of
+--         (Just rest) -> toNext rest
+--         Nothing -> attribute
+--     where
+--         go [] = Nothing
+--         go (tag:tags) = if checkSelector tag selector
+--             then Just (tag:tags)
+--             else go tags
+--
+--         toNext tags = foldr (applyStyle tags) (value . attribute) children
+--
 _buildHtml :: BuilderData -> BuilderData
 
 _buildHtml mhm = case _toRead mhm of

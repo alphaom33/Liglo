@@ -1,6 +1,7 @@
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE TupleSections #-}
 {-# LANGUAGE MultilineStrings #-}
+{-# LANGUAGE TypeSynonymInstances #-}
 
 module CSSTokenizer where
 
@@ -12,7 +13,7 @@ import Data.Char
 import HTMLParser (tracer)
 
 type Error = String
-newtype Parser a = Parser { parse :: String -> (String, Either Error a)}
+newtype Parser a = Parser {parse :: String -> (String, Either Error a)}
 
 instance Functor Parser where
     fmap f (Parser f2) = Parser $ \ stream -> case f2 stream of
@@ -149,7 +150,7 @@ matchChar :: Char -> Parser Char
 matchChar c = satisfy (== c)
 
 matchString :: String -> Parser String
-matchString = foldr (\ c -> (<*>) ((:) <$> matchChar c)) (pure [])
+matchString = foldr ((<*>) . fmap (:) . matchChar) (pure [])
 
 matchNotString :: String -> Parser String
 matchNotString str = Parser $ \ stream -> case eater stream of
