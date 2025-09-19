@@ -104,7 +104,7 @@ getAttrValue :: Attribute -> String
 getAttrValue (Attribute (_, v)) = v
 
 applyStyle :: [Tag] -> Tree (SelectorData, CSSAttribute) -> CSSAttribute
-applyStyle ts (Node _ c) = go (map ((,) ts) c)
+applyStyle ts (Node _ c) = go (map (ts,) c)
     where
         go cs = case foldr doChildren (id, []) cs of
             (val, []) -> val
@@ -112,30 +112,23 @@ applyStyle ts (Node _ c) = go (map ((,) ts) c)
 
         doChildren (tag:tags, Node ((combinator, selector), value) children) (val, out) = case combinator of
             CurrentCombinator -> if checkSelector tag selector
-                then (value . val, map ((,) (tag:tags)) children ++ out)
+                then toNext (tag:tags)
                 else (val, out)
--- applyStyle :: [Tag] -> Tree (SelectorData, CSSAttribute) -> CSSAttribute -> CSSAttribute
--- applyStyle [] _ attribute = attribute
--- applyStyle (tag:tags) (Node ((combinator, selector), value) children) attribute = case combinator of
---     CurrentCombinator -> if checkSelector tag selector
---         then toNext (tag:tags)
---         else attribute
---     ChildCombinator -> if null tags
---         then attribute
---         else if checkSelector (head tags) selector
---             then toNext tags
---             else attribute
---     DescendantCombinator -> case go tags of
---         (Just rest) -> toNext rest
---         Nothing -> attribute
---     where
---         go [] = Nothing
---         go (tag:tags) = if checkSelector tag selector
---             then Just (tag:tags)
---             else go tags
---
---         toNext tags = foldr (applyStyle tags) (value . attribute) children
---
+            ChildCombinator
+                | null tags -> (val, out)
+                | checkSelector (head tags) selector -> toNext tags
+                | otherwise -> (val, out)
+            DescendantCombinator -> case go tags of
+                (Just rest) -> toNext rest
+                Nothing -> (val, out)
+                where
+                    go [] = Nothing
+                    go (tag:tags) = if checkSelector tag selector
+                        then Just (tag:tags)
+                        else go tags
+            where
+                toNext tags = (value . val, map (tags,) children ++ out)
+
 _buildHtml :: BuilderData -> BuilderData
 
 _buildHtml mhm = case _toRead mhm of
