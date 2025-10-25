@@ -1,5 +1,6 @@
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# OPTIONS_GHC -Wno-incomplete-patterns #-}
 
 module Mortar where
 
@@ -117,8 +118,8 @@ removeEscapes str =
 escapeLength :: [Char] -> Int
 escapeLength = length . removeEscapes
 
-minit :: (Ord p, Num p) => [a] -> p -> [a] -> ([a] -> p) -> [a]
-minit lines num addendum length = _minit lines (length lines) 
+minit :: (Ord p, Num p) =>  p -> [a] -> ([a] -> p) -> [a] -> [a]
+minit num addendum length lines = _minit lines (length lines) 
     where 
         _minit lines lineLength = if lineLength < num
             then _minit (lines ++ addendum) (lineLength + 1)
@@ -160,13 +161,24 @@ handleInput state = case inputMap Map.!? _inputList state' of
             else a
         state' = over inputList checkInputList state
 
-wrapWords :: Int -> String -> [String] -> [String]
-wrapWords width str out = if escapeLength str > width
-    then
-        let (tail, rest) = splitAt width str
-            (addendum, str1) = splitLastSpace "" $ reverse tail
-        in str1 : wrapWords width (addendum ++ rest) out
-    else str : out
+wrapWords :: Int -> String -> [String]
+
+wrapWords width str = go 0 str "" "" 
+    where 
+        go count str word out = if count > width
+            then drop 1 out : go (escapeLength $ reverse word) str word ""
+            else case str of
+                [] -> [drop 1 addWord]
+                (' ':str') -> go (count + 1) str' "" addWord
+                ('\ESC':_) ->
+                    let escape = eatEscape str
+                    in go count (drop (length escape) str) (reverse escape ++ word) out
+                (s:str') -> go (count + 1) str' (s:word) out
+            where addWord = out ++ " " ++ reverse word
+
+        eatEscape ('m':_) = "m"
+        eatEscape (c:str') = c : eatEscape str'
+
 
 splitLastSpace :: [Char] -> [Char] -> ([Char], [Char])
 splitLastSpace stored [] = (stored, "")
@@ -182,19 +194,20 @@ appIt str state = do
     clearScreen
 
     windowSize <- size :: IO (Maybe (Window Int))
-    let w = fromJust windowSize
 
-    let lined = splitOn "\n" str
-    let wrapped = foldr (wrapWords $ width w) [] lined
-
-    let state' = set window w $ set strs wrapped state
+    let 
+        w = fromJust windowSize
+        lined = splitOn "\n" str
+        wrapped = foldr (\ a b -> wrapWords (width w) a ++ b) [] lined
+        minned = map (minit (width w) " " escapeLength) wrapped
+        state' = set window w $ set strs minned state
 
     drawApp state'
     runApp state'
 
     resetAttrs
     showCursor
-    clearScreen
+    -- clearScreen
 
 slice :: Int -> Int -> [a] -> [a]
 slice begin end = take (end - begin) . drop begin
@@ -203,7 +216,7 @@ drawApp :: State -> IO ()
 drawApp state = do
     let w = _window state
 
-    let minned = map (\ a -> minit a (width w) " " escapeLength) $ minit (_strs state) (height w) [""] length
+    let minned = minit (height w) [""] length (_strs state)
     let cut = take (height w) . drop (_line state) $ minned
 
     resetCursor

@@ -74,7 +74,7 @@ data BuilderData = BuilderData {
 $(makeLenses ''BuilderData)
 
 textState :: TextState
-textState = TextState {_foregroundColor=(255, 255, 255), _backgroundColor=Nothing, _bold=False, _italicized=False, _underlined=False, _struckthrough=False, _real=True, _display=Block}
+textState = TextState {_foregroundColor=(0, 0, 0), _backgroundColor=Just (255, 255, 255), _bold=False, _italicized=False, _underlined=False, _struckthrough=False, _real=True, _display=Block}
 
 builderData :: [Token] -> Tree (SelectorData, CSSAttribute) -> BuilderData
 builderData emittedTokens p_style = BuilderData {_openTags=[], _openStyles=[textState], _currentStyle=textState, _toRead=emittedTokens, _out=[], _style=p_style, _lined=True, _discard=False}
@@ -161,7 +161,7 @@ _buildHtml mhm = case _toRead mhm of
                     then appendHbox
                     else id) 
                 $ state
-                    
+
     (Character c:_) -> 
         _buildHtml 
         . doCharacter
@@ -171,7 +171,10 @@ _buildHtml mhm = case _toRead mhm of
             doCharacter mhm
                 | _discard mhm = mhm
                 | c `elem` " \n\t" && fmap _tagName (_openTags mhm' L.!? 0) /= Just "pre" = killWhitespace mhm
-                | not (null (_openTags mhm)) && null (["head", "meta", "link", "script", "style", "select"] `L.intersect` map _tagName (_openTags mhm)) = over out (c:) . set lined False $ mhm
+                | not (null (_openTags mhm)) && null (["head", "meta", "link", "script", "style", "select"] `L.intersect` map _tagName (_openTags mhm)) =
+                    over out (c:)
+                    . set lined False
+                    $ mhm
                 | otherwise = mhm
 
     (_:_) -> _buildHtml mhm'
@@ -189,24 +192,28 @@ _buildHtml mhm = case _toRead mhm of
                 state' = set currentStyle newStyle state
 
         applyStateElement new = case new of
-            (0, CheckedColor (r, g, b)) -> putText $ Mortar.setForegroundColor r g b
+            (0, CheckedColor (r, g, b)) -> undiscardedPutText $ Mortar.setForegroundColor r g b
 
-            (1, CheckedMaybe Nothing) -> putText Mortar.resetBackground
-            (1, CheckedMaybe (Just (r, g, b))) -> putText $ Mortar.setBackgroundColor r g b
+            (1, CheckedMaybe Nothing) -> undiscardedPutText Mortar.resetBackground
+            (1, CheckedMaybe (Just (r, g, b))) -> undiscardedPutText $ Mortar.setBackgroundColor r g b
 
-            (2, CheckedBool True) -> putText Mortar.bold
-            (2, CheckedBool False) -> putText Mortar.resetBold
+            (2, CheckedBool True) -> undiscardedPutText Mortar.bold
+            (2, CheckedBool False) -> undiscardedPutText Mortar.resetBold
 
-            (3, CheckedBool True) -> putText Mortar.italic
-            (3, CheckedBool False) -> putText Mortar.resetItalic
+            (3, CheckedBool True) -> undiscardedPutText Mortar.italic
+            (3, CheckedBool False) -> undiscardedPutText Mortar.resetItalic
 
-            (4, CheckedBool True) -> putText Mortar.underline
-            (4, CheckedBool False) -> putText Mortar.resetUnderline
+            (4, CheckedBool True) -> undiscardedPutText Mortar.underline
+            (4, CheckedBool False) -> undiscardedPutText Mortar.resetUnderline
 
-            (5, CheckedBool True) -> putText Mortar.strikethrough
-            (5, CheckedBool False) -> putText Mortar.resetStrikethrough
+            (5, CheckedBool True) -> undiscardedPutText Mortar.strikethrough
+            (5, CheckedBool False) -> undiscardedPutText Mortar.resetStrikethrough
 
-            (6, CheckedBool b) -> set discard $ not b
+            (6, CheckedBool b) -> set discard (not b)
+            where
+                undiscardedPutText out state = if _real $ _currentStyle state
+                    then putText out state
+                    else state
 
 
 putText :: [Char] -> BuilderData -> BuilderData
@@ -215,7 +222,7 @@ putText text = over out (reverse text++)
 killWhitespace :: BuilderData -> BuilderData
 killWhitespace mhm = _killWhitespace $ (if _lined mhm
     then id
-    else over out (' ':)) mhm
+    else over out (' ':)) $ set lined True mhm
 
 _killWhitespace :: BuilderData -> BuilderData
 _killWhitespace mhm = case next of
@@ -274,7 +281,7 @@ parseDecleretiens :: [ComponentValue] -> CSSAttribute -> CSSAttribute
 parseDecleretiens ds out = case ds of
     [] -> out
     (nextDeclaration : rest) -> parseDecleretiens rest $ case nextDeclaration of
-        (DeclarationValue (Declaration n vs _)) -> case n of
+        (DeclarationValue (Declaration n vs _)) -> out . case n of
             "display" -> case vs of
                 [PreservedValue (IdentToken "block")] -> set display Block
                 [PreservedValue (IdentToken "inline")] -> set display Inline

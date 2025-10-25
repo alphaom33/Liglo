@@ -83,7 +83,6 @@ testMain = do
 
     print outest
     -- putStr $ H.drawCSSTree outer
-    -- Mortar.appIt outest Mortar.initialState
+    Mortar.appIt outest Mortar.initialState
 
 main = testMain
-

@@ -9,6 +9,7 @@ import qualified HTMLParserTest as H
 import qualified HTMLBuilderTest as HB
 import qualified CSSTokenizerTest as T
 import qualified CSSParserTest as P
+import qualified MortarTest as M
 
 import StyleStealer
 
@@ -25,5 +26,6 @@ main = do
         , TestLabel "CSSParserTest" P.tests
         , TestLabel "NomURLTest" nomUrlTests
         , TestLabel "HTMLBuilderTest" HB.tests
+        , TestLabel "MortarTest" M.tests
         ]
     if failures result > 0 then Exit.exitFailure else Exit.exitSuccess

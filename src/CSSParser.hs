@@ -141,7 +141,9 @@ parseTokenList _out _currentList _tokens = go _out _currentList $ dropWhile (== 
             else currentList : out
 
 
-        go out currentList (ColonToken : IdentToken _ : tokens) = go out (drop 1 currentList) tokens
+        go out currentList (ColonToken : IdentToken pseudoClass : tokens) = if pseudoClass `elem` ["link"]
+            then go out currentList tokens
+            else go out (drop 1 currentList) tokens
         go out currentList (ColonToken : ColonToken : IdentToken _ : tokens) = go out currentList tokens
 
         go out currentList [WhitespaceToken] = go out currentList []
@@ -265,7 +267,7 @@ consumeSimpleBlock tokens (startingToken:s) =
 consumeAtRule :: [CSSToken] -> (ComponentValue, [CSSToken])
 consumeAtRule ((AtKeywordToken name):s) = go [] s
     where
-        go prelude state = case tracer nextInputToken of
+        go prelude state = case nextInputToken of
             SemicolonToken -> (attish Nothing, state')
             EOFToken -> (attish Nothing, state)
             OpeningCurlyBracketToken -> let (SimpleBlockValue (SimpleCurlyBlock val), state'') = consumeSimpleBlock [] state in (attish (Just val), state'')
@@ -336,7 +338,7 @@ consumeListOfDeclarations = go []
 
 _parseList :: [ComponentValue] -> [CSSToken] -> [ComponentValue]
 _parseList out state = if nextInputToken == EOFToken
-    then out
+    then reverse out
     else let (val, state') = consumeComponentValue state in _parseList (val:out) state'
     where nextInputToken = head state
 
