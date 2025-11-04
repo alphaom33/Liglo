@@ -143,7 +143,7 @@ parseTokenList _out _currentList _tokens = go _out _currentList $ dropWhile (== 
 
         go out currentList (ColonToken : IdentToken pseudoClass : tokens) = if pseudoClass `elem` ["link"]
             then go out currentList tokens
-            else go out (drop 1 currentList) tokens
+            else go out (dropWhile ((== CurrentCombinator) . fst) currentList) tokens
         go out currentList (ColonToken : ColonToken : IdentToken _ : tokens) = go out currentList tokens
 
         go out currentList [WhitespaceToken] = go out currentList []

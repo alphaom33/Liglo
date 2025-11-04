@@ -341,20 +341,21 @@ postProcess :: [CSSToken] -> [CSSToken]
 postProcess out = filter (not . (`elem` [NothingToken])) $ out ++ [EOFToken]
 
 basics :: String
-basics = """
-b {
-    font-weight: bold;
-}
-
-tt {
-    font-style: italic;
-}
-
-a {
-    color: blue;
-    text-decoration: underline;
-}
-"""
+basics = ""
+-- basics = """
+-- b {
+--     font-weight: bold;
+-- }
+--
+-- tt {
+--     font-style: italic;
+-- }
+--
+-- a {
+--     color: blue;
+--     text-decoration: underline;
+-- }
+-- """
 
 consumeAtKeyword :: Parser CSSToken
 consumeAtKeyword = dropFirst <$> matchChar '@' <*> consumeIdentSequence
