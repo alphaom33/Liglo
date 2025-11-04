@@ -155,11 +155,11 @@ _buildHtml mhm = case _toRead mhm of
             addStyle state = over openStyles (makeWidget state:) state
 
             endings tag state = 
-                applyStateDiff
-                . over openStyles (drop 1) 
-                . (if _display (_currentStyle state) == Block && _tagName tag `elem` ["li", "h1", "h2", "h3", "h4", "h5", "h6", "p", "pre", "div"] && not (_discard state)
+                (if _display (_currentStyle state) == Block && _tagName tag `elem` ["li", "h1", "h2", "h3", "h4", "h5", "h6", "p", "pre", "div"] && not (_discard state)
                     then appendHbox
                     else id) 
+                . applyStateDiff
+                . over openStyles (drop 1) 
                 $ state
 
     (Character c:_) -> 
