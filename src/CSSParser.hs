@@ -136,10 +136,8 @@ parseTokenList :: [[SelectorData]] -> [SelectorData] -> [ComponentValue] -> [[Se
 parseTokenList _out _currentList _tokens = go _out _currentList $ dropWhile (== WhitespaceToken) $ map (\ (PreservedValue p) -> p) _tokens
     where
         go :: [[SelectorData]] -> [SelectorData] -> [CSSToken] -> [[SelectorData]]
-        go out currentList [] = reverse $ if null currentList
-            then out
-            else currentList : out
-
+        go out [] [] = reverse out
+        go out currentList [] = go (currentList : out) [] []
 
         go out currentList (ColonToken : IdentToken pseudoClass : tokens) = if pseudoClass `elem` ["link"]
             then go out currentList tokens
@@ -158,7 +156,7 @@ parseTokenList _out _currentList _tokens = go _out _currentList $ dropWhile (== 
                         (combinator, rest') = matchCombinator rest
                     in 
                         go out ((combinator, selector) : currentList) rest'
-                addCurrentList = reverse currentList : out
+                addCurrentList = currentList : out
 
         getFunction tokens = (yep, rest)
             where

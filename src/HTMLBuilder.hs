@@ -30,6 +30,7 @@ instance Show CSSAttribute where
 
 type PreSelectorNode = (SelectorData, [ComponentValue])
 type SelectorNode = ([SelectorData], [ComponentValue])
+type CSSTree = Tree (SelectorData, CSSAttribute)
 
 data DisplayType =
     Inline
@@ -67,7 +68,7 @@ data BuilderData = BuilderData {
     , _openStyles :: [TextState]
     , _currentStyle :: TextState
     , _out :: String
-    , _style :: Tree (SelectorData, CSSAttribute)
+    , _style :: CSSTree
     , _lined :: Bool
     , _discard :: Bool
 } deriving Show
@@ -76,7 +77,7 @@ $(makeLenses ''BuilderData)
 textState :: TextState
 textState = TextState {_foregroundColor=(0, 0, 0), _backgroundColor=Just (255, 255, 255), _bold=False, _italicized=False, _underlined=False, _struckthrough=False, _real=True, _display=Block}
 
-builderData :: [Token] -> Tree (SelectorData, CSSAttribute) -> BuilderData
+builderData :: [Token] -> CSSTree -> BuilderData
 builderData emittedTokens p_style = BuilderData {_openTags=[], _openStyles=[textState], _currentStyle=textState, _toRead=emittedTokens, _out=[], _style=p_style, _lined=True, _discard=False}
 
 makeWidget :: BuilderData -> TextState
@@ -103,13 +104,14 @@ getAttrJust tag = maybe "" getAttrValue . getAttr tag
 getAttrValue :: Attribute -> String
 getAttrValue (Attribute (_, v)) = v
 
-applyStyle :: [Tag] -> Tree (SelectorData, CSSAttribute) -> CSSAttribute
+applyStyle :: [Tag] -> CSSTree -> CSSAttribute
 applyStyle ts (Node _ c) = go (map (ts,) c)
     where
         go cs = case foldr doChildren (id, []) cs of
             (val, []) -> val
             (val, a) -> go a . val
 
+        doChildren :: ([Tag], CSSTree) -> (CSSAttribute, [([Tag], CSSTree)]) -> (CSSAttribute, [([Tag], CSSTree)])
         doChildren (tag:tags, Node ((combinator, selector), value) children) (val, out) = case combinator of
             CurrentCombinator -> if checkSelector tag selector
                 then toNext (tag:tags)
@@ -155,7 +157,7 @@ _buildHtml mhm = case _toRead mhm of
             addStyle state = over openStyles (makeWidget state:) state
 
             endings tag state = 
-                (if _display (_currentStyle state) == Block && _tagName tag `elem` ["li", "h1", "h2", "h3", "h4", "h5", "h6", "p", "pre", "div"] && not (_discard state)
+                (if _display (_currentStyle state) == Block && _tagName tag `elem` ["li", "h1", "h2", "h3", "h4", "h5", "h6", "p", "pre", "div", "dt", "dd"] && not (_discard state)
                     then appendHbox
                     else id) 
                 . applyStateDiff
@@ -311,7 +313,7 @@ parseDecleretiens ds out = case ds of
             _ -> id
         _ -> out
 
-buildCSSTree :: [ComponentValue] -> Tree (SelectorData, CSSAttribute)
+buildCSSTree :: [ComponentValue] -> CSSTree
 buildCSSTree css = unfoldTree _buildCSSTree (blamCSS [] css)
 
 blamCSS :: [SelectorNode] -> [ComponentValue] -> (PreSelectorNode, [SelectorNode])
@@ -343,7 +345,7 @@ _buildCSSTree ((selector, val), css) =
         sorted = foldr selectish [] css
     in ((selector, parseDecleretiens val id), sorted)
 
-countCSSTree :: Int -> Tree (SelectorData, CSSAttribute) -> Int
+countCSSTree :: Int -> CSSTree -> Int
 countCSSTree num tree = case subForest tree of
     [] -> 1
     _ -> foldr ((+) . countCSSTree 0) num (subForest tree)
