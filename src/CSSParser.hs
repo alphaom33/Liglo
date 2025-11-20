@@ -37,6 +37,7 @@ data Selector =
     | AttrSelector String AttrNess
     | NotSelector Selector
     | OrSelector [Selector]
+    | AndSelector [Selector]
     deriving (Show, Eq)
 
 data CurlyBlock = CurlyBlock [[SelectorData]] [ComponentValue] deriving (Show, Eq)
@@ -132,8 +133,19 @@ eatSquare (ClosingSquareBracketToken : rest) = (rest, [ClosingSquareBracketToken
 eatSquare (WhitespaceToken : rest) = eatSquare rest
 eatSquare (next : rest) = (next:) <$> eatSquare rest
 
+ackackack :: [SelectorData] -> [SelectorData] -> [SelectorData] -> [SelectorData] -- TODO fix this absolutely idiotic nonsense
+ackackack mhm out [] = if null mhm
+    then out
+    else ((CurrentCombinator, AndSelector (map snd mhm)):out)
+
+ackackack mhm out ((c, s):ss) = case c of
+    CurrentCombinator -> ackackack ((c, s) : mhm) out ss
+    _ -> if null mhm
+        then ackackack [] ((c,s):out) ss
+        else ackackack [] ((c, AndSelector (s:map snd mhm)):out) ss
+
 parseTokenList :: [[SelectorData]] -> [SelectorData] -> [ComponentValue] -> [[SelectorData]]
-parseTokenList _out _currentList _tokens = go _out _currentList $ dropWhile (== WhitespaceToken) $ map (\ (PreservedValue p) -> p) _tokens
+parseTokenList _out _currentList _tokens = map (ackackack [] [] . reverse) $ go _out _currentList $ dropWhile (== WhitespaceToken) $ map (\ (PreservedValue p) -> p) _tokens
     where
         go :: [[SelectorData]] -> [SelectorData] -> [CSSToken] -> [[SelectorData]]
         go out [] [] = reverse out

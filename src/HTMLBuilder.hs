@@ -98,6 +98,7 @@ checkSelector tag selector = case selector of
     (StateSelector _ _) -> False
     (NotSelector c) -> not $ checkSelector tag c
     (OrSelector c) -> any (checkSelector tag) c
+    (AndSelector c) -> foldr (\ a b -> checkSelector tag a && b) True c
 
 getAttrJust :: Tag -> String -> String
 getAttrJust tag = maybe "" getAttrValue . getAttr tag
@@ -298,7 +299,9 @@ parseDecleretiens ds out = case ds of
                 [PreservedValue (IdentToken "none")] -> set real True
                 _ -> set real False
             "color" -> set foregroundColor $ parseColor vs
-            "background" -> set backgroundColor $ Just $ parseColor vs
+            "background" -> set backgroundColor $ if vs == [PreservedValue (IdentToken "transparent")]
+                then Nothing
+                else Just $ parseColor vs
             "background-color" -> set backgroundColor $ Just $ parseColor vs
             "font-weight" -> case vs of
                 [PreservedValue (IdentToken "bold")] -> set bold True
