@@ -173,7 +173,7 @@ _buildHtml mhm = case _toRead mhm of
         where
             doCharacter mhm
                 | _discard mhm = mhm
-                | c `elem` " \n\t" && not ("pre" `elem` map _tagName (_openTags mhm)) = killWhitespace mhm
+                | c `elem` " \n\t" && "pre" `notElem` map _tagName (_openTags mhm) = killWhitespace mhm
                 | not (null (_openTags mhm)) && null (["head", "meta", "link", "script", "style", "select"] `L.intersect` map _tagName (_openTags mhm)) =
                     over out (c:)
                     . set lined False

@@ -136,7 +136,7 @@ eatSquare (next : rest) = (next:) <$> eatSquare rest
 ackackack :: [SelectorData] -> [SelectorData] -> [SelectorData] -> [SelectorData] -- TODO fix this absolutely idiotic nonsense
 ackackack mhm out [] = if null mhm
     then out
-    else ((CurrentCombinator, AndSelector (map snd mhm)):out)
+    else (CurrentCombinator, AndSelector (map snd mhm)):out
 
 ackackack mhm out ((c, s):ss) = case c of
     CurrentCombinator -> ackackack ((c, s) : mhm) out ss
@@ -153,7 +153,7 @@ parseTokenList _out _currentList _tokens = map (ackackack [] [] . reverse) $ go 
 
         go out currentList (ColonToken : IdentToken pseudoClass : tokens) = if pseudoClass `elem` ["link"]
             then go out currentList tokens
-            else go out (dropWhile ((== CurrentCombinator) . fst) currentList) tokens
+            else go out [] (drop 1 $ dropWhile (/= CommaToken) tokens)
         go out currentList (ColonToken : ColonToken : IdentToken _ : tokens) = go out currentList tokens
 
         go out currentList [WhitespaceToken] = go out currentList []
