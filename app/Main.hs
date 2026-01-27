@@ -67,7 +67,7 @@ coolMain = do
 
     let out = CT.parseString str
     let outer = CP.parseList $ fromRight [] $ snd out
-    let outest = H.parseWebpage result outer
+    let outest = H.parseWebpage result outer (0, 0)
 
     Mortar.appIt outest Mortar.initialState
 
@@ -79,7 +79,8 @@ testMain = do
 
     let out = CT.parseString str
     let outer = CP.parseList $ fromRight [] $ snd out
-    let outest = H.parseWebpage result outer
+    -- let outest = H.parseTableTest result outer (0, 0)
+    let outest = H.parseWebpage result outer (0, 0)
 
     print outest
     -- putStr $ H.drawCSSTree outer

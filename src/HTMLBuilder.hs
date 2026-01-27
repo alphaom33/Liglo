@@ -17,7 +17,7 @@ import Debug.Trace
 import Lens.Micro.TH (makeLenses)
 import Lens.Micro (set, over)
 
-import HTMLParser (Token(..), Tag, Attribute(..), _selfClosing, _opening, _tagName, tracer, _attrs, opening)
+import HTMLParser (Token(..), Tag, Attribute(..), _selfClosing, _opening, _tagName, tracer, _attrs)
 import CSSParser
 import CSSTokenizer
 import qualified Mortar
@@ -56,10 +56,10 @@ data CheckedTextState =
     deriving (Show, Eq)
 
 toChecked :: TextState -> [(Int, CheckedTextState)]
-toChecked textState = 
+toChecked textState =
     let
         arrayed = [CheckedColor $ _foregroundColor textState, CheckedMaybe $ _backgroundColor textState] ++ map CheckedBool [_bold textState, _italicized textState, _underlined textState, _struckthrough textState, _real textState]
-    in 
+    in
         zip [0..] arrayed
 
 data BuilderData = BuilderData {
@@ -71,14 +71,27 @@ data BuilderData = BuilderData {
     , _style :: CSSTree
     , _lined :: Bool
     , _discard :: Bool
+    , _size :: (Int, Int)
 } deriving Show
 $(makeLenses ''BuilderData)
+
+data TableData = TableData {
+    _tBuilderData :: BuilderData
+    , _rowed :: Bool
+    , _tOut :: [[String]]
+    , _buffer :: String
+    , _bufferer :: [String]
+} deriving Show
+$(makeLenses ''TableData)
 
 textState :: TextState
 textState = TextState {_foregroundColor=(0, 0, 0), _backgroundColor=Just (255, 255, 255), _bold=False, _italicized=False, _underlined=False, _struckthrough=False, _real=True, _display=Block}
 
-builderData :: [Token] -> CSSTree -> BuilderData
-builderData emittedTokens p_style = BuilderData {_openTags=[], _openStyles=[textState], _currentStyle=textState, _toRead=emittedTokens, _out=[], _style=p_style, _lined=True, _discard=False}
+builderData :: [Token] -> CSSTree -> (Int, Int) -> BuilderData
+builderData emittedTokens p_style p_size = BuilderData {_openTags=[], _openStyles=[textState], _currentStyle=textState, _toRead=emittedTokens, _out=[], _style=p_style, _lined=True, _discard=False, _size=p_size}
+
+tableData :: BuilderData -> TableData
+tableData p_builderData = TableData {_tBuilderData=p_builderData, _rowed=True, _tOut=[], _buffer="", _bufferer=[]}
 
 makeWidget :: BuilderData -> TextState
 makeWidget mhm = applyStyle (_openTags mhm) (_style mhm) (head $ _openStyles mhm)
@@ -132,53 +145,70 @@ applyStyle ts (Node _ c) = go (map (ts,) c)
             where
                 toNext tags = (value . val, map (tags,) children ++ out)
 
-_buildHtml :: BuilderData -> BuilderData
-
-_buildHtml mhm = case _toRead mhm of
-    (TagToken t:_) -> _buildHtml $ if -- ...what
-        | _selfClosing t -> (if _tagName t == "br" && not (_discard mhm)
+parseTag :: Tag -> BuilderData -> BuilderData
+parseTag t mhm
+        | _selfClosing t = (if _tagName t == "br" && not (_discard mhm)
             then appendHbox
-            else id) mhm'
-        | _opening t -> addStyle $ over openTags (t:) mhm'
-        | not $ _opening t -> killExtras mhm'
+            else id) mhm
+        | _opening t = 
+            (if _tagName t == "table" then runTable else id)
+            . addStyle 
+            . over openTags (t:)
+            $ mhm
+        | not $ _opening t = killExtras mhm
         where
-            killExtras mhm''
-                | null $ _openTags mhm'' = mhm''
-                | (_tagName . head . _openTags $ mhm') /= _tagName t =
+
+            runTable mhm =
+                let 
+                    newData = buildTable $ tableData $ over toRead (drop 1) mhm
+                    tableString = outputTable newData
+                in 
+                    over out (tableString++) 
+                    . set lined True
+                    $ _tBuilderData newData
+
+            killExtras mhm'
+                | null $ _openTags mhm' = mhm'
+                | (_tagName . head . _openTags $ mhm) /= _tagName t =
                     killExtras
                     . doEnd
-                    $ mhm''
-                | otherwise = doEnd mhm''
+                    $ mhm'
+                | otherwise = doEnd mhm'
 
-            doEnd mhm'' =
+            doEnd mhm' =
                 over openTags (drop 1)
-                . endings (head $ _openTags mhm'')
-                $ mhm''
+                . endings (head $ _openTags mhm')
+                $ mhm'
 
             addStyle state = over openStyles (makeWidget state:) state
 
-            endings tag state = 
+            endings tag state =
                 (if _display (_currentStyle state) == Block && _tagName tag `elem` ["li", "h1", "h2", "h3", "h4", "h5", "h6", "p", "pre", "div", "dt", "dd"] && not (_discard state)
                     then appendHbox
-                    else id) 
+                    else id)
                 . applyStateDiff
-                . over openStyles (drop 1) 
+                . over openStyles (drop 1)
                 $ state
 
-    (Character c:_) -> 
-        _buildHtml 
-        . doCharacter
+parseCharacter :: Char -> BuilderData -> BuilderData
+parseCharacter c mhm
+    | _discard mhm = mhm
+    | c `elem` " \n\t" && "pre" `notElem` map _tagName (_openTags mhm) = killWhitespace mhm
+    | not (null (_openTags mhm)) && null (["head", "meta", "link", "script", "style", "select"] `L.intersect` map _tagName (_openTags mhm)) =
+        over out (c:)
+        . set lined False
+        $ mhm
+    | otherwise = mhm
+
+_buildHtml :: BuilderData -> BuilderData
+
+_buildHtml mhm = case _toRead mhm of
+    (TagToken t:_) -> _buildHtml $ parseTag t mhm'
+    (Character c:_) ->
+        _buildHtml
+        . parseCharacter c
         . applyStateDiff
         $ mhm'
-        where
-            doCharacter mhm
-                | _discard mhm = mhm
-                | c `elem` " \n\t" && "pre" `notElem` map _tagName (_openTags mhm) = killWhitespace mhm
-                | not (null (_openTags mhm)) && null (["head", "meta", "link", "script", "style", "select"] `L.intersect` map _tagName (_openTags mhm)) =
-                    over out (c:)
-                    . set lined False
-                    $ mhm
-                | otherwise = mhm
 
     (_:_) -> _buildHtml mhm'
 
@@ -186,41 +216,84 @@ _buildHtml mhm = case _toRead mhm of
     where
         mhm' = over toRead (drop 1) mhm
 
-        appendHbox = set lined True . putText "\n"
+buildTable :: TableData -> TableData
+buildTable mhm = case _toRead bData of
+    (TagToken t:_) -> case (_opening t, _tagName t) of
+        (False, "tr") -> buildTable $
+            set rowed True
+            . set bufferer []
+            . over tOut (_bufferer mhm':)
+            . elemateIt
+              $ mhm'
+        (False, "td") -> buildTable $ elemateIt mhm'
 
-        applyStateDiff state = foldr (\ (old, new) b -> if old == new then b else applyStateElement new b) state' $ zip (toChecked oldStyle) (toChecked newStyle)
-            where
-                oldStyle = _currentStyle state
-                newStyle = head $ _openStyles state
-                state' = set currentStyle newStyle state
+        (True, "tr") ->  buildTable mhm'
+        (True, "td") -> buildTable mhm'
 
-        applyStateElement new = case new of
-            (0, CheckedColor (r, g, b)) -> undiscardedPutText $ Mortar.setForegroundColor r g b
+        (False, "table") -> trace "what" mhm'
 
-            (1, CheckedMaybe Nothing) -> undiscardedPutText Mortar.resetBackground
-            (1, CheckedMaybe (Just (r, g, b))) -> undiscardedPutText $ Mortar.setBackgroundColor r g b
+        _ -> buildTable $ over tBuilderData (over toRead (drop 1) . parseTag t) mhm
 
-            (2, CheckedBool True) -> undiscardedPutText Mortar.bold
-            (2, CheckedBool False) -> undiscardedPutText Mortar.resetBold
+    (Character c:_) -> buildTable $ over buffer ((_out $ parseCharacter c (set out [] bData))++) mhm'
+    where
+        bData = _tBuilderData mhm
 
-            (3, CheckedBool True) -> undiscardedPutText Mortar.italic
-            (3, CheckedBool False) -> undiscardedPutText Mortar.resetItalic
+        elemateIt = set buffer "" . over bufferer (_buffer mhm':)
 
-            (4, CheckedBool True) -> undiscardedPutText Mortar.underline
-            (4, CheckedBool False) -> undiscardedPutText Mortar.resetUnderline
+        mhm' = over tBuilderData (over toRead (drop 1)) mhm
 
-            (5, CheckedBool True) -> undiscardedPutText Mortar.strikethrough
-            (5, CheckedBool False) -> undiscardedPutText Mortar.resetStrikethrough
+outputTable :: TableData -> String
+outputTable mhm = "\n" ++ tableIt (_tOut mhm)
+    where
+        rowIt [e] = space ++ e
+        rowIt (e:es) = space ++ e ++ space ++ " " ++ rowIt es
+        rowIt [] = ""
 
-            (6, CheckedBool b) -> set discard (not b)
-            where
-                undiscardedPutText out state = if _real $ _currentStyle state
-                    then putText out state
-                    else state
+        tableIt (r:rs) = rowIt r ++ "\n" ++ tableIt rs
+        tableIt [] = ""
+
+        bData = _tBuilderData mhm
+        hWidth = fst (_size bData) - (length (head $ _tOut mhm) + 1) `div` 2
+        space = replicate hWidth ' '
+
+applyStateDiff :: BuilderData -> BuilderData
+applyStateDiff state = foldr (\ (old, new) b -> if old == new then b else applyStateElement new b) state' $ zip (toChecked oldStyle) (toChecked newStyle)
+    where
+        oldStyle = _currentStyle state
+        newStyle = head $ _openStyles state
+        state' = set currentStyle newStyle state
+
+applyStateElement :: (Eq a, Num a) => (a, CheckedTextState) -> BuilderData -> BuilderData
+applyStateElement new = case new of
+    (0, CheckedColor (r, g, b)) -> undiscardedPutText $ Mortar.setForegroundColor r g b
+
+    (1, CheckedMaybe Nothing) -> undiscardedPutText Mortar.resetBackground
+    (1, CheckedMaybe (Just (r, g, b))) -> undiscardedPutText $ Mortar.setBackgroundColor r g b
+
+    (2, CheckedBool True) -> undiscardedPutText Mortar.bold
+    (2, CheckedBool False) -> undiscardedPutText Mortar.resetBold
+
+    (3, CheckedBool True) -> undiscardedPutText Mortar.italic
+    (3, CheckedBool False) -> undiscardedPutText Mortar.resetItalic
+
+    (4, CheckedBool True) -> undiscardedPutText Mortar.underline
+    (4, CheckedBool False) -> undiscardedPutText Mortar.resetUnderline
+
+    (5, CheckedBool True) -> undiscardedPutText Mortar.strikethrough
+    (5, CheckedBool False) -> undiscardedPutText Mortar.resetStrikethrough
+
+    (6, CheckedBool b) -> set discard (not b)
+    where
+        undiscardedPutText out state = if _real $ _currentStyle state
+            then putText out state
+            else state
 
 
 putText :: [Char] -> BuilderData -> BuilderData
 putText text = over out (reverse text++)
+
+appendHbox :: BuilderData -> BuilderData
+appendHbox = set lined True . putText "\n"
 
 killWhitespace :: BuilderData -> BuilderData
 killWhitespace mhm = _killWhitespace $ (if _lined mhm
@@ -260,9 +333,10 @@ parseColor v = case v of
         hslToRgb :: (Float, Float, Float) -> (Float, Float, Float)
         hslToRgb (_h, s, l) = ((r' + m) * 255, (b' + m) * 255, (g' + m) * 255)
             where
-                h = fromIntegral $ round _h `mod` 360
+                h :: Float
+                h = fromIntegral $ round _h `mod` (360 :: Integer)
                 c = (1 - abs (2 * l - 1)) * s
-                x = c * (1 - abs (fromIntegral $ (round (h / 60) `mod` 2) - 1))
+                x = c * (1 - abs (fromIntegral $ (round (h / 60) `mod` (2 :: Integer)) - 1))
                 m = l - c / 2
                 (r', g', b')
                     | 0 <= h && h < 60 = (c, x, 0)
@@ -353,8 +427,11 @@ countCSSTree num tree = case subForest tree of
     [] -> 1
     _ -> foldr ((+) . countCSSTree 0) num (subForest tree)
 
-parseWebpage :: [Token] -> [ComponentValue] -> String
-parseWebpage emittedTokens css = reverse $ _out $ _buildHtml $ builderData emittedTokens $ buildCSSTree css
+parseWebpage :: [Token] -> [ComponentValue] -> (Int, Int) -> String
+parseWebpage emittedTokens css = reverse . _out . _buildHtml . builderData emittedTokens (buildCSSTree css)
+
+parseTableTest :: [Token] -> [ComponentValue] -> (Int, Int) -> String
+parseTableTest emittedTokens css eyes = outputTable $ buildTable (TableData {_tBuilderData=builderData emittedTokens (buildCSSTree css) eyes, _rowed=True, _tOut=[], _buffer="", _bufferer=[]})
 
 drawCSSTree :: [ComponentValue] -> String
 drawCSSTree css = drawTree $ show . fst <$> buildCSSTree css
