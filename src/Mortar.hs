@@ -186,8 +186,8 @@ splitLastSpace stored (c:cs) = if c == ' '
     then (stored, reverse cs)
     else splitLastSpace (c:stored) cs
 
-appIt :: [Char] -> State -> IO ()
-appIt str state = do
+appIt :: ((Int, Int) -> [Char]) -> State -> IO ()
+appIt ack state = do
     hSetBuffering stdin NoBuffering
     hSetEcho stdin False
     hideCursor
@@ -195,8 +195,10 @@ appIt str state = do
 
     windowSize <- size :: IO (Maybe (Window Int))
 
+
     let 
         w = fromJust windowSize
+        str = ack (width w, height w)
         lined = splitOn "\n" str
         wrapped = foldr (\ a b -> wrapWords (width w) a ++ b) [] lined
         minned = map (minit (width w) " " escapeLength) wrapped

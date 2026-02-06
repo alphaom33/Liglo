@@ -4,6 +4,7 @@
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE MultiWayIf #-}
 {-# OPTIONS_GHC -Wno-incomplete-patterns #-}
+{-# OPTIONS_GHC -Wno-name-shadowing #-}
 
 module HTMLBuilder where
 
@@ -77,7 +78,6 @@ $(makeLenses ''BuilderData)
 
 data TableData = TableData {
     _tBuilderData :: BuilderData
-    , _rowed :: Bool
     , _tOut :: [[String]]
     , _buffer :: String
     , _bufferer :: [String]
@@ -91,7 +91,7 @@ builderData :: [Token] -> CSSTree -> (Int, Int) -> BuilderData
 builderData emittedTokens p_style p_size = BuilderData {_openTags=[], _openStyles=[textState], _currentStyle=textState, _toRead=emittedTokens, _out=[], _style=p_style, _lined=True, _discard=False, _size=p_size}
 
 tableData :: BuilderData -> TableData
-tableData p_builderData = TableData {_tBuilderData=p_builderData, _rowed=True, _tOut=[], _buffer="", _bufferer=[]}
+tableData p_builderData = TableData {_tBuilderData=p_builderData, _tOut=[], _buffer="", _bufferer=[]}
 
 makeWidget :: BuilderData -> TextState
 makeWidget mhm = applyStyle (_openTags mhm) (_style mhm) (head $ _openStyles mhm)
@@ -150,21 +150,21 @@ parseTag t mhm
         | _selfClosing t = (if _tagName t == "br" && not (_discard mhm)
             then appendHbox
             else id) mhm
-        | _opening t = 
+        | _opening t =
             (if _tagName t == "table" then runTable else id)
-            . addStyle 
+            . addStyle
             . over openTags (t:)
             $ mhm
         | not $ _opening t = killExtras mhm
         where
-
-            runTable mhm =
-                let 
-                    newData = buildTable $ tableData $ over toRead (drop 1) mhm
+            runTable mhm' =
+                let
+                    newData = buildTable $ tableData $ set lined True $ set out "" $ over toRead (drop 1) mhm'
                     tableString = outputTable newData
-                in 
-                    over out (tableString++) 
+                in
+                    over out ((tableString++) . (if head (_out mhm') == '\n' then id else ('\n':)))
                     . set lined True
+                    . set out (_out mhm')
                     $ _tBuilderData newData
 
             killExtras mhm'
@@ -220,21 +220,29 @@ buildTable :: TableData -> TableData
 buildTable mhm = case _toRead bData of
     (TagToken t:_) -> case (_opening t, _tagName t) of
         (False, "tr") -> buildTable $
-            set rowed True
+            over tBuilderData (set lined True)
             . set bufferer []
             . over tOut (_bufferer mhm':)
             . elemateIt
               $ mhm'
-        (False, "td") -> buildTable $ elemateIt mhm'
+        (False, "td") -> buildTable $ elemateIt . over tBuilderData (set lined True) $ mhm'
+        (False, "th") -> buildTable $ elemateIt . over tBuilderData (set lined True) $ mhm'
 
         (True, "tr") ->  buildTable mhm'
         (True, "td") -> buildTable mhm'
+        (True, "th") -> buildTable mhm'
+
+        (True, "caption") -> buildTable $ over tBuilderData (over toRead (drop 1 . dropWhile (\case
+            (TagToken t) -> _tagName t /= "caption"
+            _ -> True))) mhm'
 
         (False, "table") -> trace "what" mhm'
 
         _ -> buildTable $ over tBuilderData (over toRead (drop 1) . parseTag t) mhm
 
-    (Character c:_) -> buildTable $ over buffer ((_out $ parseCharacter c (set out [] bData))++) mhm'
+    (Character c:_) -> buildTable $
+        let bData' = parseCharacter c (set out [] bData)
+        in over tBuilderData (set lined $ _lined bData') $ over buffer (_out bData' ++) mhm'
     where
         bData = _tBuilderData mhm
 
@@ -243,18 +251,19 @@ buildTable mhm = case _toRead bData of
         mhm' = over tBuilderData (over toRead (drop 1)) mhm
 
 outputTable :: TableData -> String
-outputTable mhm = "\n" ++ tableIt (_tOut mhm)
+outputTable mhm = tableIt (_tOut mhm)
     where
-        rowIt [e] = space ++ e
-        rowIt (e:es) = space ++ e ++ space ++ " " ++ rowIt es
+        rowIt [e] = space e ++ e
+        rowIt (e:es) = space e ++ e ++ rowIt es
         rowIt [] = ""
 
+        tableIt [r] = rowIt r
         tableIt (r:rs) = rowIt r ++ "\n" ++ tableIt rs
         tableIt [] = ""
 
         bData = _tBuilderData mhm
-        hWidth = fst (_size bData) - (length (head $ _tOut mhm) + 1) `div` 2
-        space = replicate hWidth ' '
+        hWidth = fst (_size bData) `div` length (head $ _tOut mhm)
+        space e = replicate (hWidth - length e) ' '
 
 applyStateDiff :: BuilderData -> BuilderData
 applyStateDiff state = foldr (\ (old, new) b -> if old == new then b else applyStateElement new b) state' $ zip (toChecked oldStyle) (toChecked newStyle)
@@ -431,7 +440,7 @@ parseWebpage :: [Token] -> [ComponentValue] -> (Int, Int) -> String
 parseWebpage emittedTokens css = reverse . _out . _buildHtml . builderData emittedTokens (buildCSSTree css)
 
 parseTableTest :: [Token] -> [ComponentValue] -> (Int, Int) -> String
-parseTableTest emittedTokens css eyes = outputTable $ buildTable (TableData {_tBuilderData=builderData emittedTokens (buildCSSTree css) eyes, _rowed=True, _tOut=[], _buffer="", _bufferer=[]})
+parseTableTest emittedTokens css eyes = outputTable $ buildTable (TableData {_tBuilderData=builderData emittedTokens (buildCSSTree css) eyes, _tOut=[], _buffer="", _bufferer=[]})
 
 drawCSSTree :: [ComponentValue] -> String
 drawCSSTree css = drawTree $ show . fst <$> buildCSSTree css
