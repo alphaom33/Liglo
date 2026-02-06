@@ -24,6 +24,7 @@ import CSSTokenizer
 import qualified Mortar
 
 import CharacterReferences
+import Mortar (wrapWords)
 
 type CSSAttribute = TextState -> TextState
 instance Show CSSAttribute where
@@ -162,7 +163,7 @@ parseTag t mhm
                     newData = buildTable $ tableData $ set lined True $ set out "" $ over toRead (drop 1) mhm'
                     tableString = outputTable newData
                 in
-                    over out ((tableString++) . (if head (_out mhm') == '\n' then id else ('\n':)))
+                    over out ((tableString++) . (if not (null $ _out mhm') && head (_out mhm') == '\n' then id else ('\n':)))
                     . set lined True
                     . set out (_out mhm')
                     $ _tBuilderData newData
@@ -251,7 +252,7 @@ buildTable mhm = case _toRead bData of
         mhm' = over tBuilderData (over toRead (drop 1)) mhm
 
 outputTable :: TableData -> String
-outputTable mhm = tableIt (_tOut mhm)
+outputTable mhm = tableIt $ bottomed vHeight broken
     where
         rowIt [e] = space e ++ e
         rowIt (e:es) = space e ++ e ++ rowIt es
@@ -264,6 +265,20 @@ outputTable mhm = tableIt (_tOut mhm)
         bData = _tBuilderData mhm
         hWidth = fst (_size bData) `div` length (head $ _tOut mhm)
         space e = replicate (hWidth - length e) ' '
+
+        broken :: [[[String]]]
+        broken = map (map (wrapWords hWidth)) $ tracer (_tOut mhm)
+        vHeight = map (maximum . map length) broken
+
+        bottomed :: [Int] -> [[[String]]] -> [[String]]
+        bottomed (h:hs) (r:rs) = go h ++ bottomed hs rs
+            where 
+                go :: Int -> [[String]]
+                go (-1) = []
+                go i = map (\ x -> case x L.!? i of
+                    (Just x) -> x
+                    Nothing -> []) r : go (i - 1)
+        bottomed [] [] = []
 
 applyStateDiff :: BuilderData -> BuilderData
 applyStateDiff state = foldr (\ (old, new) b -> if old == new then b else applyStateElement new b) state' $ zip (toChecked oldStyle) (toChecked newStyle)
