@@ -5,10 +5,6 @@ Overall document style
 
 @import url('resources/fonts/dejavu.css');
 
-h3, a {
-    background: red;
-}
-
 body {
     background-color:#ffffff;
     color:#353833;

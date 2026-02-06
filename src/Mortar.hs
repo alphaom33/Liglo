@@ -195,7 +195,6 @@ appIt ack state = do
 
     windowSize <- size :: IO (Maybe (Window Int))
 
-
     let 
         w = fromJust windowSize
         str = ack (width w, height w)

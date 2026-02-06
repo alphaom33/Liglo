@@ -16,7 +16,7 @@ import Data.Tree
 import Debug.Trace
 
 import Lens.Micro.TH (makeLenses)
-import Lens.Micro (set, over)
+import Lens.Micro (set, over, ASetter)
 
 import HTMLParser (Token(..), Tag, Attribute(..), _selfClosing, _opening, _tagName, tracer, _attrs)
 import CSSParser
@@ -24,7 +24,7 @@ import CSSTokenizer
 import qualified Mortar
 
 import CharacterReferences
-import Mortar (wrapWords)
+import Mortar (wrapWords, escapeLength)
 
 type CSSAttribute = TextState -> TextState
 instance Show CSSAttribute where
@@ -82,6 +82,8 @@ data TableData = TableData {
     , _tOut :: [[String]]
     , _buffer :: String
     , _bufferer :: [String]
+    , _posttion :: String
+    , _caption :: String
 } deriving Show
 $(makeLenses ''TableData)
 
@@ -92,7 +94,7 @@ builderData :: [Token] -> CSSTree -> (Int, Int) -> BuilderData
 builderData emittedTokens p_style p_size = BuilderData {_openTags=[], _openStyles=[textState], _currentStyle=textState, _toRead=emittedTokens, _out=[], _style=p_style, _lined=True, _discard=False, _size=p_size}
 
 tableData :: BuilderData -> TableData
-tableData p_builderData = TableData {_tBuilderData=p_builderData, _tOut=[], _buffer="", _bufferer=[]}
+tableData p_builderData = TableData {_tBuilderData=p_builderData, _tOut=[], _buffer="", _bufferer=[], _posttion="", _caption=""}
 
 makeWidget :: BuilderData -> TextState
 makeWidget mhm = applyStyle (_openTags mhm) (_style mhm) (head $ _openStyles mhm)
@@ -148,9 +150,7 @@ applyStyle ts (Node _ c) = go (map (ts,) c)
 
 parseTag :: Tag -> BuilderData -> BuilderData
 parseTag t mhm
-        | _selfClosing t = (if _tagName t == "br" && not (_discard mhm)
-            then appendHbox
-            else id) mhm
+        | _tagName t == "br" && not (_discard mhm) = appendHbox mhm
         | _opening t =
             (if _tagName t == "table" then runTable else id)
             . addStyle
@@ -163,7 +163,8 @@ parseTag t mhm
                     newData = buildTable $ tableData $ set lined True $ set out "" $ over toRead (drop 1) mhm'
                     tableString = outputTable newData
                 in
-                    over out ((tableString++) . (if not (null $ _out mhm') && head (_out mhm') == '\n' then id else ('\n':)))
+                    over out (((_posttion newData ++ tableString ++ (if null $ _caption newData then "" else '\n':_caption newData)) ++) . (if not (null $ _out mhm') && head (_out mhm') == '\n' then id else ('\n':)))
+                    . applyStateDiff --TODO does this actually do anything?
                     . set lined True
                     . set out (_out mhm')
                     $ _tBuilderData newData
@@ -218,38 +219,50 @@ _buildHtml mhm = case _toRead mhm of
         mhm' = over toRead (drop 1) mhm
 
 buildTable :: TableData -> TableData
-buildTable mhm = case _toRead bData of
-    (TagToken t:_) -> case (_opening t, _tagName t) of
-        (False, "tr") -> buildTable $
-            over tBuilderData (set lined True)
-            . set bufferer []
-            . over tOut (_bufferer mhm':)
-            . elemateIt
-              $ mhm'
-        (False, "td") -> buildTable $ elemateIt . over tBuilderData (set lined True) $ mhm'
-        (False, "th") -> buildTable $ elemateIt . over tBuilderData (set lined True) $ mhm'
+buildTable m = case head $ _toRead bData of
+    (TagToken t) -> case (_opening t, _tagName t) of
+        (False, "table") -> set posttion (_buffer mhm) mhm
+        (True, "caption") -> buildTable $ over tBuilderData (set lined True) $ grabCaption mhm
 
-        (True, "tr") ->  buildTable mhm'
-        (True, "td") -> buildTable mhm'
-        (True, "th") -> buildTable mhm'
+        x -> buildTable $ doATag buffer t $ case x of
+            (False, "tr") ->
+                over tBuilderData (set lined True)
+                . set bufferer []
+                . over tOut (_bufferer mhm:)
+                . elemateIt
+                $ mhm
+            (False, "td") -> closeTd
+            (False, "th") -> closeTd
 
-        (True, "caption") -> buildTable $ over tBuilderData (over toRead (drop 1 . dropWhile (\case
-            (TagToken t) -> _tagName t /= "caption"
-            _ -> True))) mhm'
+            (True, "tr") -> openTd
+            (True, "td") -> openTd
+            (True, "th") -> mhm
 
-        (False, "table") -> trace "what" mhm'
+            _ -> mhm
 
-        _ -> buildTable $ over tBuilderData (over toRead (drop 1) . parseTag t) mhm
-
-    (Character c:_) -> buildTable $
-        let bData' = parseCharacter c (set out [] bData)
-        in over tBuilderData (set lined $ _lined bData') $ over buffer (_out bData' ++) mhm'
+    (Character c) -> buildTable $ doACharacter buffer c mhm
     where
+        grabCaption mhm = case head $ _toRead (_tBuilderData mhm) of
+            (TagToken t) -> if _tagName t == "caption" && not (_opening t)
+                then doATag caption t mhm
+                else grabCaption $ doATag caption t mhm
+            (Character c) -> grabCaption $ doACharacter caption c mhm
+
+        doACharacter lens c mhm =
+            let bData' = parseCharacter c . applyStateDiff . set out ""  $ bData
+            in over lens (_out bData'++) $ over tBuilderData (set lined (_lined bData') . set currentStyle (_currentStyle bData') . over toRead (drop 1)) mhm
+
+        doATag :: ASetter TableData TableData [Char] [Char] -> Tag -> TableData -> TableData
+        doATag lens t = (\ umhum -> over lens (_out (_tBuilderData umhum)++) umhum) . over tBuilderData (over toRead (drop 1) . parseTag t)
+
+        openTd = mhm
+        closeTd = elemateIt . over tBuilderData (set lined True) $ mhm
+
         bData = _tBuilderData mhm
 
-        elemateIt = set buffer "" . over bufferer (_buffer mhm':)
+        elemateIt = set buffer "" . over bufferer (_buffer mhm:)
 
-        mhm' = over tBuilderData (over toRead (drop 1)) mhm
+        mhm = over tBuilderData (set out "") m
 
 outputTable :: TableData -> String
 outputTable mhm = tableIt $ bottomed vHeight broken
@@ -264,10 +277,10 @@ outputTable mhm = tableIt $ bottomed vHeight broken
 
         bData = _tBuilderData mhm
         hWidth = fst (_size bData) `div` length (head $ _tOut mhm)
-        space e = replicate (hWidth - length e) ' '
+        space e = replicate (hWidth - escapeLength (reverse e)) ' '
 
         broken :: [[[String]]]
-        broken = map (map (wrapWords hWidth)) $ tracer (_tOut mhm)
+        broken = map (map (map reverse . wrapWords hWidth . reverse)) $ _tOut mhm
         vHeight = map (maximum . map length) broken
 
         bottomed :: [Int] -> [[[String]]] -> [[String]]
@@ -455,7 +468,7 @@ parseWebpage :: [Token] -> [ComponentValue] -> (Int, Int) -> String
 parseWebpage emittedTokens css = reverse . _out . _buildHtml . builderData emittedTokens (buildCSSTree css)
 
 parseTableTest :: [Token] -> [ComponentValue] -> (Int, Int) -> String
-parseTableTest emittedTokens css eyes = outputTable $ buildTable (TableData {_tBuilderData=builderData emittedTokens (buildCSSTree css) eyes, _tOut=[], _buffer="", _bufferer=[]})
+parseTableTest emittedTokens css eyes = outputTable $ buildTable (TableData {_tBuilderData=builderData emittedTokens (buildCSSTree css) eyes, _tOut=[], _buffer="", _bufferer=[], _posttion="", _caption=""})
 
 drawCSSTree :: [ComponentValue] -> String
 drawCSSTree css = drawTree $ show . fst <$> buildCSSTree css
