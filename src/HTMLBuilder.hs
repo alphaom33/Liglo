@@ -160,7 +160,7 @@ parseTag t mhm
         where
             runTable mhm' =
                 let
-                    newData = buildTable $ tableData $ set lined True $ set out "" $ over toRead (drop 1) mhm'
+                    newData = buildTable buffer $ tableData $ set lined True $ set out "" $ over toRead (drop 1) mhm'
                     tableString = outputTable newData
                 in
                     over out (((_posttion newData ++ tableString ++ (if null $ _caption newData then "" else '\n':_caption newData)) ++) . (if not (null $ _out mhm') && head (_out mhm') == '\n' then id else ('\n':)))
@@ -218,44 +218,37 @@ _buildHtml mhm = case _toRead mhm of
     where
         mhm' = over toRead (drop 1) mhm
 
-buildTable :: TableData -> TableData
-buildTable m = case head $ _toRead bData of
+buildTable :: ASetter TableData TableData String String -> TableData -> TableData
+buildTable lens m = case head $ _toRead bData of
     (TagToken t) -> case (_opening t, _tagName t) of
         (False, "table") -> set posttion (_buffer mhm) mhm
-        (True, "caption") -> buildTable $ over tBuilderData (set lined True) $ grabCaption mhm
+        (True, "caption") -> buildTable caption $ doATag caption t mhm
+        (False, "caption") -> buildTable buffer $ over tBuilderData (set lined True) $ doATag caption t mhm
 
-        x -> buildTable $ doATag buffer t $ case x of
+        x -> buildTable lens $ doATag lens t $ case x of
+
             (False, "tr") ->
                 over tBuilderData (set lined True)
                 . set bufferer []
                 . over tOut (_bufferer mhm:)
                 . elemateIt
                 $ mhm
+
             (False, "td") -> closeTd
             (False, "th") -> closeTd
 
-            (True, "tr") -> openTd
-            (True, "td") -> openTd
-            (True, "th") -> mhm
-
             _ -> mhm
 
-    (Character c) -> buildTable $ doACharacter buffer c mhm
+    (Character c) -> buildTable lens $ doACharacter lens c mhm
     where
-        grabCaption mhm = case head $ _toRead (_tBuilderData mhm) of
-            (TagToken t) -> if _tagName t == "caption" && not (_opening t)
-                then doATag caption t mhm
-                else grabCaption $ doATag caption t mhm
-            (Character c) -> grabCaption $ doACharacter caption c mhm
 
         doACharacter lens c mhm =
-            let bData' = parseCharacter c . applyStateDiff . set out ""  $ bData
+            let bData' = parseCharacter c . applyStateDiff . set out "" $ bData
             in over lens (_out bData'++) $ over tBuilderData (set lined (_lined bData') . set currentStyle (_currentStyle bData') . over toRead (drop 1)) mhm
 
         doATag :: ASetter TableData TableData [Char] [Char] -> Tag -> TableData -> TableData
         doATag lens t = (\ umhum -> over lens (_out (_tBuilderData umhum)++) umhum) . over tBuilderData (over toRead (drop 1) . parseTag t)
 
-        openTd = mhm
         closeTd = elemateIt . over tBuilderData (set lined True) $ mhm
 
         bData = _tBuilderData mhm
@@ -408,7 +401,7 @@ parseDecleretiens ds out = case ds of
                 _ -> set real False
             "float" -> case vs of
                 [PreservedValue (IdentToken "none")] -> set real True
-                _ -> set real False
+                _ -> set real True -- TODO ahhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhh
             "color" -> set foregroundColor $ parseColor vs
             "background" -> set backgroundColor $ if vs == [PreservedValue (IdentToken "transparent")]
                 then Nothing
@@ -468,7 +461,7 @@ parseWebpage :: [Token] -> [ComponentValue] -> (Int, Int) -> String
 parseWebpage emittedTokens css = reverse . _out . _buildHtml . builderData emittedTokens (buildCSSTree css)
 
 parseTableTest :: [Token] -> [ComponentValue] -> (Int, Int) -> String
-parseTableTest emittedTokens css eyes = outputTable $ buildTable (TableData {_tBuilderData=builderData emittedTokens (buildCSSTree css) eyes, _tOut=[], _buffer="", _bufferer=[], _posttion="", _caption=""})
+parseTableTest emittedTokens css eyes = outputTable $ buildTable buffer (TableData {_tBuilderData=builderData emittedTokens (buildCSSTree css) eyes, _tOut=[], _buffer="", _bufferer=[], _posttion="", _caption=""})
 
 drawCSSTree :: [ComponentValue] -> String
 drawCSSTree css = drawTree $ show . fst <$> buildCSSTree css
