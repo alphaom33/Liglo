@@ -19,6 +19,7 @@ download executable, add to path, then register API key at https://programmables
 - [ ] Put API key in config rather than an environment variable
 - [ ] Add website-specific handlers
     - [ ] Make them user-configurable
+- [ ] Color theme support
 - [ ] Add more thorough testing
 - [ ] Do more performance testing
 - [ ] Remove Brick as a dependency
