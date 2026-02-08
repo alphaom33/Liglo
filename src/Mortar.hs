@@ -191,7 +191,7 @@ appIt ack state = do
     hSetBuffering stdin NoBuffering
     hSetEcho stdin False
     hideCursor
-    -- clearScreen
+    clearScreen
 
     windowSize <- size :: IO (Maybe (Window Int))
 
@@ -208,7 +208,7 @@ appIt ack state = do
 
     resetAttrs
     showCursor
-    -- clearScreen
+    clearScreen
 
 slice :: Int -> Int -> [a] -> [a]
 slice begin end = take (end - begin) . drop begin
@@ -220,7 +220,7 @@ drawApp state = do
     let minned = minit (height w) [""] length (_strs state)
     let cut = take (height w) . drop (_line state) $ minned
 
-    -- resetCursor
+    resetCursor
     putStr $ concat cut
     hFlush stdout
 

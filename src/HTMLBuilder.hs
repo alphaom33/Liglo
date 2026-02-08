@@ -401,7 +401,7 @@ parseDecleretiens ds out = case ds of
                 _ -> set real False
             "float" -> case vs of
                 [PreservedValue (IdentToken "none")] -> set real True
-                _ -> set real True -- TODO ahhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhh
+                _ -> set real False
             "color" -> set foregroundColor $ parseColor vs
             "background" -> set backgroundColor $ if vs == [PreservedValue (IdentToken "transparent")]
                 then Nothing
