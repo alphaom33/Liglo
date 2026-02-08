@@ -15,6 +15,7 @@ Read the rendered page, then quit with q
 Download executable, add to path, then register API key at https://programmablesearchengine.google.com/ and add it as the GOOGLE_API_KEY environment variable.
 
 ## Changes
+- [ ] Fix flickering
 - [ ] Add a config file
 - [ ] Put API key in config rather than an environment variable
 - [ ] Add website-specific handlers
@@ -24,3 +25,4 @@ Download executable, add to path, then register API key at https://programmables
 - [ ] Do more performance testing
 - [ ] Remove Brick as a dependency
 - [ ] Figure out something better than forcing google registration
+- [ ] Preserve terminal state from before program is run

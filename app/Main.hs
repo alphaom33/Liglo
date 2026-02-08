@@ -21,16 +21,16 @@ import StyleStealer
 searchMain :: IO ()
 searchMain = do
     args <- getArgs
-    let arged = map (\ c -> if c == ' ' then '+' else c) $ concat args
+    let arged = drop 1 $ foldr (\ c a ->  '+':c ++ a) [] args
     when (null arged) (do
-        print ("Failure: no search supplied" :: String)
+        putStrLn "Failure: no search supplied"
         exitFailure)
 
     key <- lookupEnv "GOOGLE_API_KEY"
     let apiKey = fromJust key
-    finalState <- Brick.defaultMain SearchApp.app $ SearchApp.initialState apiKey $ head args
+    finalState <- Brick.defaultMain SearchApp.app $ SearchApp.initialState apiKey arged
 
-    when (SearchApp._curQuery finalState == head args) (do
+    when (SearchApp._curQuery finalState == arged) (do
         exitSuccess)
 
     let finalURL = SearchApp._curQuery finalState

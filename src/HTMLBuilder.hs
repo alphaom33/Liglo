@@ -14,7 +14,7 @@ import Data.Tree
 import Lens.Micro.TH (makeLenses)
 import Lens.Micro (set, over, ASetter)
 
-import HTMLParser (Token(..), Tag, Attribute(..), _opening, _tagName, tracer, _attrs)
+import HTMLParser (Token(..), Tag, Attribute(..), _opening, _tagName, _attrs)
 import CSSParser
 import CSSTokenizer
 import qualified Mortar
@@ -201,17 +201,16 @@ parseCharacter c mhm
         $ mhm
     | otherwise = mhm
 
-_buildHtml :: BuilderData -> BuilderData
-
-_buildHtml mhm = case _toRead mhm of
-    (TagToken t:_) -> _buildHtml $ parseTag t mhm'
+buildHtml :: BuilderData -> BuilderData
+buildHtml mhm = case _toRead mhm of
+    (TagToken t:_) -> buildHtml $ parseTag t mhm'
     (Character c:_) ->
-        _buildHtml
+        buildHtml
         . parseCharacter c
         . applyStateDiff
         $ mhm'
 
-    (_:_) -> _buildHtml mhm'
+    (_:_) -> buildHtml mhm'
 
     [] -> mhm
     where
@@ -257,7 +256,7 @@ buildTable lens m = case head $ _toRead bData of
         mhm = over tBuilderData (set webString "") m
 
 outputTable :: TableData -> String
-outputTable mhm = tableIt $ bottomed vHeight $ tracer broken
+outputTable mhm = tableIt $ bottomed vHeight broken
     where
         rowIt [e] = space e ++ e
         rowIt (e:es) = space e ++ e ++ rowIt es
@@ -457,7 +456,7 @@ countCSSTree num tree = case subForest tree of
     _ -> foldr ((+) . countCSSTree 0) num (subForest tree)
 
 parseWebpage :: [Token] -> [ComponentValue] -> (Int, Int) -> String
-parseWebpage emittedTokens css = reverse . _webString . _buildHtml . builderData emittedTokens (buildCSSTree css)
+parseWebpage emittedTokens css = reverse . _webString . buildHtml . builderData emittedTokens (buildCSSTree css)
 
 drawCSSTree :: [ComponentValue] -> String
 drawCSSTree css = drawTree $ show . fst <$> buildCSSTree css
