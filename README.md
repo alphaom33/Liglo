@@ -12,7 +12,7 @@ Read the rendered page, then quit with q
 ![Rendered Page](/images/rendered_page.png)
 
 ## Installation
-download executable, add to path, then register API key at https://programmablesearchengine.google.com/ and add it as the GOOGLE_API_KEY environment variable.
+Download executable, add to path, then register API key at https://programmablesearchengine.google.com/ and add it as the GOOGLE_API_KEY environment variable.
 
 ## Changes
 - [ ] Add a config file
