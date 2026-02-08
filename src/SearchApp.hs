@@ -5,30 +5,25 @@
 module SearchApp where
 
 import Text.Wrap (WrapSettings(..), FillScope(..), FillStrategy(..))
-import GHC.Generics (Generic)
 
 import Brick
-import Brick.Main (App)
-
 import Graphics.Vty as V
 
 import Lens.Micro.Mtl ((.=), (%=), use, view)
 import Lens.Micro.TH (makeLenses)
-import Lens.Micro (set, (^.))
+import Lens.Micro (set)
 
-import Control.Monad (join, when, unless)
+import Control.Monad (when)
 import Data.Maybe (fromJust)
-import Brick.Widgets.Center (center, hCenter)
+import Brick.Widgets.Center (hCenter)
 import Brick.Widgets.Border (border)
-import Brick.Widgets.Border.Style
-import Brick.Forms (editTextField, (@@=), renderForm, newForm, Form (formState, formFocus), handleFormEvent, setFieldValid, FormFieldState (formFieldUpdate))
+import Brick.Forms (editTextField, renderForm, newForm, Form (formState, formFocus), handleFormEvent)
 import Data.Text (Text, unpack)
 import Brick.Focus (focusRingCursor)
-import Message (Message(NewSearch, Error, EnterSite, NextPage, LastPage))
-import Brick.BChan
-import Item (Item (title, snippet, link))
+import Message (Message())
+import Item
 import Network (getResponse)
-import Control.Monad.Cont (MonadIO(liftIO))
+import Control.Monad.IO.Class (liftIO)
 
 newtype Search = Search {
     _query :: Text
@@ -52,21 +47,21 @@ instance Show State where
 
 $(makeLenses ''State)
 
+wrapSettings :: WrapSettings
 wrapSettings = WrapSettings {
-    preserveIndentation = True,
-    breakLongWords = True,
-    fillStrategy = NoFill,
-    fillScope = FillAfterFirst}
+    preserveIndentation = True
+    , breakLongWords = True
+    , fillStrategy = NoFill
+    , fillScope = FillAfterFirst
+    }
 
 mkForm :: Search -> Form Search e Name
-mkForm = newForm [ editTextField query QueryField (Just 1) ]
+mkForm = newForm [editTextField query QueryField (Just 1)]
 
 drawForm :: State -> Widget Name
 drawForm state =
-    let
-        attr = withAttr $ attrName "searchBox"
-    in
-        attr $ border $ hCenter $ renderForm $ view form state
+    let attr = withAttr $ attrName "searchBox"
+    in attr $ border $ hCenter $ renderForm $ view form state
 
 --TODO variable dst
 boxThing :: Int -> Item -> Widget Name
@@ -74,8 +69,9 @@ boxThing index item =
     let
         el yep = yep <=> str ("  " ++ snippet item) <=> str " "
         label = str (title item)
-    in
-        if index == 0 then el (withAttr (attrName "current") label) else el label
+    in if index == 0 
+        then el (withAttr (attrName "current") label) 
+        else el label
 
 makeBoxes :: State -> [Widget Name]
 makeBoxes state = zipWith boxThing (map (view cursorPos state-) [0..]) (view mytems state)
@@ -86,7 +82,7 @@ drawUI state = (if not $ view canMove state then (drawForm state:) else id)
 
 getAttrMap :: State -> AttrMap
 getAttrMap state = attrMap defAttr [
-    (attrName "current", if view canMove state then bg blue else defAttr),
+    (attrName "current", if view canMove state then black `on` blue else defAttr),
     (attrName "searchBox", if not $ view canMove state then fg white else fg black),
     (attrName "focusedFormInputAttr", white `on` blue),
     (attrName "invalidFormInputAttr", red `on` yellow)]
@@ -96,9 +92,9 @@ wrap func state =
     let
         cur = func $ view cursorPos state
         top = fromIntegral  (length $ view mytems state) - 1
-        wrap = min top $ max 0 cur
+        wrapPoint = min top $ max 0 cur
     in
-        set cursorPos wrap state
+        set cursorPos wrapPoint state
 
 checkCur :: Int -> Int -> Int -> Int
 checkCur scroll cur height
@@ -114,8 +110,8 @@ moveCursor :: (Int -> Int) -> EventM Name State ()
 moveCursor func = do
     modify $ wrap func
 
-    view <- lookupViewport Viewport1
-    let size = fromJust view
+    myViewport <- lookupViewport Viewport1
+    let size = fromJust myViewport
     let height = regionHeight $ _vpSize size
 
     newPos <- use cursorPos
@@ -130,26 +126,23 @@ movePage dir = do
     curQuery' <- use curQuery
     key' <- use key
 
-    last <- use page
+    lastPage <- use page
     page %= dir
     page %= max 0
     page' <- use page
-    when (last /= page') (do
+    when (lastPage /= page') (do
         next <- liftIO (getResponse curQuery' key' page')
         mytems .= next)
 
 handleEvent :: BrickEvent Name Message -> EventM Name State ()
-
-handleEvent (AppEvent e) = return ()
-
-handleEvent event = do
+handleEvent (VtyEvent ev) = do
     curCanMove <- use canMove
-    let (VtyEvent ev) = event
     case (curCanMove, ev) of
         (_, V.EvKey V.KEsc []) -> halt
         (_, V.EvKey (V.KChar '=') []) -> do
             canMove %= not
             form .= emptyForm
+        (_, V.EvKey (V.KChar 'q') []) -> halt
 
         (True, V.EvKey (V.KChar 'j') []) -> moveCursor (+1)
         (True, V.EvKey (V.KChar 'k') []) -> moveCursor (subtract 1)
@@ -157,8 +150,8 @@ handleEvent event = do
         (True, V.EvKey (V.KChar 'l') []) -> movePage (+ 1)
         (True, V.EvKey V.KEnter []) -> do
             curPos <- use cursorPos
-            mytems <- use mytems
-            curQuery .= link (mytems!!curPos)
+            items <- use mytems
+            curQuery .= link (items!!curPos)
             halt
 
         (False, V.EvKey V.KEnter []) -> do
@@ -168,14 +161,19 @@ handleEvent event = do
             form' <- use form
             next <- liftIO (getResponse (unpack (_query $ formState form')) key' page')
             mytems .= next
-        (False, _) -> zoom form $ handleFormEvent event
+        (False, _) -> zoom form $ handleFormEvent $ VtyEvent ev
+        _ -> return ()
+
+handleEvent _ = return ()
 
 
+emptyForm :: Form Search e Name
 emptyForm = mkForm Search {_query=""}
 
-initialState key query = State {
-    _curQuery = query,
-    _key = key,
+initialState :: String -> String -> State
+initialState p_key p_query = State {
+    _curQuery = p_query,
+    _key = p_key,
     _page = 0,
     _mytems = [],
     _cursorPos = 0,
@@ -183,6 +181,7 @@ initialState key query = State {
     _canMove = True,
     _form = emptyForm}
 
+start :: EventM Name State ()
 start = do
     curQuery' <- use curQuery
     key' <- use key
@@ -190,9 +189,12 @@ start = do
     next <- liftIO (getResponse curQuery' key' page')
     mytems .= next
 
+app :: App State Message Name
 app = App {
-    appStartEvent = start,
-    appChooseCursor = focusRingCursor formFocus . view form,
-    appDraw = drawUI,
-    appHandleEvent = handleEvent,
-    appAttrMap = getAttrMap} :: App State Message Name
+    appStartEvent = start
+    , appChooseCursor = focusRingCursor formFocus . view form
+    , appDraw = drawUI
+    , appHandleEvent = handleEvent
+    , appAttrMap = getAttrMap
+    }
+

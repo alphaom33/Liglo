@@ -1,2 +1,3 @@
 #!/bin/bash
-cabal new-run Readle "$*" --ghc-options="-threaded"
+cabal configure --enable-library-profiling --enable-executable-profiling --enable-profiling
+cabal new-run Readle "$*"
