@@ -1,6 +1,6 @@
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE OverloadedStrings #-}
-{-# OPTIONS_GHC -Wno-incomplete-patterns #-}
+{-# OPTIONS_GHC -Wno-incomplete-uni-patterns #-}
 
 module Mortar where
 
@@ -119,11 +119,11 @@ escapeLength :: [Char] -> Int
 escapeLength = length . removeEscapes
 
 minit :: (Ord p, Num p) =>  p -> [a] -> ([a] -> p) -> [a] -> [a]
-minit num addendum length lines = _minit lines (length lines) 
+minit num addendum lengthFunction str = _minit str (lengthFunction str) 
     where 
-        _minit lines lineLength = if lineLength < num
-            then _minit (lines ++ addendum) (lineLength + 1)
-            else lines
+        _minit str' lineLength = if lineLength < num
+            then _minit (str' ++ addendum) (lineLength + 1)
+            else str'
 
 getKey :: IO [Char]
 getKey = reverse <$> _getKey ""
@@ -134,9 +134,9 @@ getKey = reverse <$> _getKey ""
             (if more then _getKey else return) $ char : chars
 
 clamp :: Ord a => a -> a -> a -> a
-clamp min max num 
-    | num > max = max
-    | num < min = min
+clamp minNum maxNum num 
+    | num > maxNum = maxNum
+    | num < minNum = minNum
     | otherwise = num
 
 clampScreen :: State -> State
@@ -163,17 +163,17 @@ handleInput state = case inputMap Map.!? _inputList state' of
 
 wrapWords :: Int -> String -> [String]
 
-wrapWords width str = go 0 str "" "" 
+wrapWords maxWidth str = go 0 str "" "" 
     where 
-        go count str word out = if count > width
-            then drop 1 out : go (escapeLength $ reverse word) str word ""
-            else case str of
+        go count str' word out = if count > maxWidth
+            then drop 1 out : go (escapeLength $ reverse word) str' word ""
+            else case str' of
                 [] -> [drop 1 addWord]
-                (' ':str') -> go (count + 1) str' "" addWord
+                (' ':str'') -> go (count + 1) str'' "" addWord
                 ('\ESC':_) ->
-                    let escape = eatEscape str
-                    in go count (drop (length escape) str) (reverse escape ++ word) out
-                (s:str') -> go (count + 1) str' (s:word) out
+                    let escape = eatEscape str'
+                    in go count (drop (length escape) str') (reverse escape ++ word) out
+                (s:str'') -> go (count + 1) str'' (s:word) out
             where addWord = out ++ " " ++ reverse word
 
         eatEscape ('m':_) = "m"

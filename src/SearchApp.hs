@@ -82,7 +82,7 @@ drawUI state = (if not $ view canMove state then (drawForm state:) else id)
 
 getAttrMap :: State -> AttrMap
 getAttrMap state = attrMap defAttr [
-    (attrName "current", if view canMove state then bg blue else defAttr),
+    (attrName "current", if view canMove state then black `on` blue else defAttr),
     (attrName "searchBox", if not $ view canMove state then fg white else fg black),
     (attrName "focusedFormInputAttr", white `on` blue),
     (attrName "invalidFormInputAttr", red `on` yellow)]

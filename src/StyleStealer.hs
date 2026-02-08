@@ -5,12 +5,13 @@ module StyleStealer where
 
 import qualified Data.List as L
 
-import HTMLParser
+import HTMLParser (Tag, Attribute(..), Token(..), _attrs, _opening, _tagName)
 import Network.HTTP.Client
 import Network.HTTP.Simple
 import Data.ByteString.Lazy.Char8 (unpack)
 import Data.List.Split (splitOn)
 
+getAttr :: Tag -> String -> Maybe Attribute
 getAttr t name = filter (\ (Attribute (n, _)) -> n == name) (_attrs t) L.!? 0
 
 grabStylesheets :: [Token] -> [Token]
@@ -61,6 +62,7 @@ takeStyles out (next:rest) = case next of
         else takeStyles out rest
     _ -> takeStyles out rest
 
+takeChars :: [Char] -> [Token] -> ([Char], [Token])
 takeChars out (next:rest) = case next of
     (Character c) -> takeChars (c : out) rest
     (TagToken t) -> if not (_opening t) && _tagName t == "style"

@@ -5,12 +5,10 @@
 
 module CSSTokenizer where
 
-import Text.Regex.TDFA
+import Text.Regex.TDFA ((=~))
 import Control.Applicative
 import Data.Function
 import Data.Char
-
-import HTMLParser (tracer)
 
 type Error = String
 newtype Parser a = Parser {parse :: String -> (String, Either Error a)}
@@ -65,7 +63,7 @@ someParser (Parser f) = Parser $ \ stream -> case f stream of
     (rest, Left err) -> (rest, Left err)
 
 numParser :: (Eq t, Num t) => t -> Parser a -> Parser [a]
-numParser num (Parser f) = Parser (go num)
+numParser n (Parser f) = Parser (go n)
     where
         go 0 stream = (stream, Right [])
         go num stream = case f stream of
@@ -251,6 +249,7 @@ consumeHash = dropFirst <$> matchChar '#' <*> Parser (\ stream ->
         dropFirst _ a = a
         (Parser doHashy) = HashToken <$> ((,) <$> passes checkWouldStartIdentSequence <*> consumeIdentSequence)
 
+consumeClass :: Parser CSSToken
 consumeClass = dropFirst <$> matchChar '.' <*> consumeIdentSequence
     where dropFirst _ = ClassToken
 
@@ -297,7 +296,7 @@ checkDigit = ready (sequentiate (++) [
         orAnd (Parser f) (Parser g) = Parser $ \ stream -> case f stream of
             (rest, Right a) -> case g rest of
                 (rest', Right b) -> (rest', Right $ a ++ b)
-                (_, Left err) -> (rest, Right a)
+                (_, Left _) -> (rest, Right a)
             (_, Left _) -> g stream
 
 consumeNumeric :: Parser CSSToken
@@ -327,7 +326,7 @@ consumeIdentLike =
         (Parser strart) = matchChar '\'' <|> matchChar '"'
         (Parser beginn) = sequentiate (++) [
             matchString "url("
-            , concat <$> manyParser (numParser 2 matchWhitespace)
+            , concat <$> manyParser (numParser (2 :: Int) matchWhitespace)
             , makeOptional $ pluralate matchWhitespace
             ]
         dropLast a _ = a
@@ -341,21 +340,20 @@ postProcess :: [CSSToken] -> [CSSToken]
 postProcess out = filter (not . (`elem` [NothingToken])) $ out ++ [EOFToken]
 
 basics :: String
-basics = ""
--- basics = """
--- b {
---     font-weight: bold;
--- }
---
--- tt {
---     font-style: italic;
--- }
---
--- a {
---     color: blue;
---     text-decoration: underline;
--- }
--- """
+basics = """
+b {
+    font-weight: bold;
+}
+
+tt {
+    font-style: italic;
+}
+
+a {
+    color: blue;
+    text-decoration: underline;
+}
+"""
 
 consumeAtKeyword :: Parser CSSToken
 consumeAtKeyword = dropFirst <$> matchChar '@' <*> consumeIdentSequence
@@ -388,6 +386,6 @@ parseString str =
                 <|> eatByStart matchIdentStart consumeIdentLike
                 <|> Parser (\case
                     [] -> ("", Left "end of stream")
-                    (c:str) -> (str, Right $ DelimToken c))
+                    (c:str') -> (str', Right $ DelimToken c))
             )) preProcessed
 

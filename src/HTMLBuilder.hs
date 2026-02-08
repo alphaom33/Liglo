@@ -3,8 +3,6 @@
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE MultiWayIf #-}
-{-# OPTIONS_GHC -Wno-incomplete-patterns #-}
-{-# OPTIONS_GHC -Wno-name-shadowing #-}
 
 module HTMLBuilder where
 
@@ -13,12 +11,10 @@ import qualified Data.Map as M
 import Data.List.Split
 import Data.Tree
 
-import Debug.Trace
-
 import Lens.Micro.TH (makeLenses)
 import Lens.Micro (set, over, ASetter)
 
-import HTMLParser (Token(..), Tag, Attribute(..), _selfClosing, _opening, _tagName, tracer, _attrs)
+import HTMLParser (Token(..), Tag, Attribute(..), _opening, _tagName, tracer, _attrs)
 import CSSParser
 import CSSTokenizer
 import qualified Mortar
@@ -69,7 +65,7 @@ data BuilderData = BuilderData {
     , _openTags :: [Tag]
     , _openStyles :: [TextState]
     , _currentStyle :: TextState
-    , _out :: String
+    , _webString :: String
     , _style :: CSSTree
     , _lined :: Bool
     , _discard :: Bool
@@ -91,7 +87,7 @@ textState :: TextState
 textState = TextState {_foregroundColor=(0, 0, 0), _backgroundColor=Just (255, 255, 255), _bold=False, _italicized=False, _underlined=False, _struckthrough=False, _real=True, _display=Block}
 
 builderData :: [Token] -> CSSTree -> (Int, Int) -> BuilderData
-builderData emittedTokens p_style p_size = BuilderData {_openTags=[], _openStyles=[textState], _currentStyle=textState, _toRead=emittedTokens, _out=[], _style=p_style, _lined=True, _discard=False, _size=p_size}
+builderData emittedTokens p_style p_size = BuilderData {_openTags=[], _openStyles=[textState], _currentStyle=textState, _toRead=emittedTokens, _webString=[], _style=p_style, _lined=True, _discard=False, _size=p_size}
 
 tableData :: BuilderData -> TableData
 tableData p_builderData = TableData {_tBuilderData=p_builderData, _tOut=[], _buffer="", _bufferer=[], _posttion="", _caption=""}
@@ -137,16 +133,16 @@ applyStyle ts (Node _ c) = go (map (ts,) c)
                 | null tags -> (val, out)
                 | checkSelector (head tags) selector -> toNext tags
                 | otherwise -> (val, out)
-            DescendantCombinator -> case go tags of
+            DescendantCombinator -> case go' tags of
                 (Just rest) -> toNext rest
                 Nothing -> (val, out)
                 where
-                    go [] = Nothing
-                    go (tag:tags) = if checkSelector tag selector
-                        then Just (tag:tags)
-                        else go tags
+                    go' [] = Nothing
+                    go' (newTag:newTags) = if checkSelector newTag selector
+                        then Just (newTag:newTags)
+                        else go' newTags
             where
-                toNext tags = (value . val, map (tags,) children ++ out)
+                toNext currentTags = (value . val, map (currentTags,) children ++ out)
 
 parseTag :: Tag -> BuilderData -> BuilderData
 parseTag t mhm
@@ -160,13 +156,16 @@ parseTag t mhm
         where
             runTable mhm' =
                 let
-                    newData = buildTable buffer $ tableData $ set lined True $ set out "" $ over toRead (drop 1) mhm'
+                    newData = buildTable buffer $ tableData $ set lined True $ set webString "" $ over toRead (drop 1) mhm'
                     tableString = outputTable newData
                 in
-                    over out (((_posttion newData ++ tableString ++ (if null $ _caption newData then "" else '\n':_caption newData)) ++) . (if not (null $ _out mhm') && head (_out mhm') == '\n' then id else ('\n':)))
+                    over webString (((_posttion newData ++ tableString ++
+                        (if null $ _caption newData then "" else '\n':_caption newData)) ++)
+                        . ('\n':)
+                        . (if not (null $ _webString mhm') && head (_webString mhm') == '\n' then id else ('\n':)))
                     . applyStateDiff --TODO does this actually do anything?
                     . set lined True
-                    . set out (_out mhm')
+                    . set webString (_webString mhm')
                     $ _tBuilderData newData
 
             killExtras mhm'
@@ -197,7 +196,7 @@ parseCharacter c mhm
     | _discard mhm = mhm
     | c `elem` " \n\t" && "pre" `notElem` map _tagName (_openTags mhm) = killWhitespace mhm
     | not (null (_openTags mhm)) && null (["head", "meta", "link", "script", "style", "select"] `L.intersect` map _tagName (_openTags mhm)) =
-        over out (c:)
+        over webString (c:)
         . set lined False
         $ mhm
     | otherwise = mhm
@@ -242,12 +241,12 @@ buildTable lens m = case head $ _toRead bData of
     (Character c) -> buildTable lens $ doACharacter lens c mhm
     where
 
-        doACharacter lens c mhm =
-            let bData' = parseCharacter c . applyStateDiff . set out "" $ bData
-            in over lens (_out bData'++) $ over tBuilderData (set lined (_lined bData') . set currentStyle (_currentStyle bData') . over toRead (drop 1)) mhm
+        doACharacter charLens c =
+            let bData' = parseCharacter c . applyStateDiff . set webString "" $ bData
+            in over charLens (_webString bData'++) . over tBuilderData (set lined (_lined bData') . set currentStyle (_currentStyle bData') . over toRead (drop 1))
 
         doATag :: ASetter TableData TableData [Char] [Char] -> Tag -> TableData -> TableData
-        doATag lens t = (\ umhum -> over lens (_out (_tBuilderData umhum)++) umhum) . over tBuilderData (over toRead (drop 1) . parseTag t)
+        doATag tagLens t = (\ umhum -> over tagLens (_webString (_tBuilderData umhum)++) umhum) . over tBuilderData (over toRead (drop 1) . parseTag t)
 
         closeTd = elemateIt . over tBuilderData (set lined True) $ mhm
 
@@ -255,10 +254,10 @@ buildTable lens m = case head $ _toRead bData of
 
         elemateIt = set buffer "" . over bufferer (_buffer mhm:)
 
-        mhm = over tBuilderData (set out "") m
+        mhm = over tBuilderData (set webString "") m
 
 outputTable :: TableData -> String
-outputTable mhm = tableIt $ bottomed vHeight broken
+outputTable mhm = tableIt $ bottomed vHeight $ tracer broken
     where
         rowIt [e] = space e ++ e
         rowIt (e:es) = space e ++ e ++ rowIt es
@@ -273,16 +272,16 @@ outputTable mhm = tableIt $ bottomed vHeight broken
         space e = replicate (hWidth - escapeLength (reverse e)) ' '
 
         broken :: [[[String]]]
-        broken = map (map (map reverse . wrapWords hWidth . reverse)) $ _tOut mhm
+        broken = map (map (foldr ((\ x a -> splitOn "\n" x ++ a) . reverse) [] . wrapWords hWidth . reverse . dropWhile (== '\n'))) $ _tOut mhm
         vHeight = map (maximum . map length) broken
 
         bottomed :: [Int] -> [[[String]]] -> [[String]]
         bottomed (h:hs) (r:rs) = go h ++ bottomed hs rs
-            where 
+            where
                 go :: Int -> [[String]]
                 go (-1) = []
                 go i = map (\ x -> case x L.!? i of
-                    (Just x) -> x
+                    (Just x') -> x'
                     Nothing -> []) r : go (i - 1)
         bottomed [] [] = []
 
@@ -320,7 +319,7 @@ applyStateElement new = case new of
 
 
 putText :: [Char] -> BuilderData -> BuilderData
-putText text = over out (reverse text++)
+putText text = over webString (reverse text++)
 
 appendHbox :: BuilderData -> BuilderData
 appendHbox = set lined True . putText "\n"
@@ -328,7 +327,7 @@ appendHbox = set lined True . putText "\n"
 killWhitespace :: BuilderData -> BuilderData
 killWhitespace mhm = _killWhitespace $ (if _lined mhm
     then id
-    else over out (' ':)) $ set lined True mhm
+    else over webString (' ':)) $ set lined True mhm
 
 _killWhitespace :: BuilderData -> BuilderData
 _killWhitespace mhm = case next of
@@ -458,10 +457,7 @@ countCSSTree num tree = case subForest tree of
     _ -> foldr ((+) . countCSSTree 0) num (subForest tree)
 
 parseWebpage :: [Token] -> [ComponentValue] -> (Int, Int) -> String
-parseWebpage emittedTokens css = reverse . _out . _buildHtml . builderData emittedTokens (buildCSSTree css)
-
-parseTableTest :: [Token] -> [ComponentValue] -> (Int, Int) -> String
-parseTableTest emittedTokens css eyes = outputTable $ buildTable buffer (TableData {_tBuilderData=builderData emittedTokens (buildCSSTree css) eyes, _tOut=[], _buffer="", _bufferer=[], _posttion="", _caption=""})
+parseWebpage emittedTokens css = reverse . _webString . _buildHtml . builderData emittedTokens (buildCSSTree css)
 
 drawCSSTree :: [ComponentValue] -> String
 drawCSSTree css = drawTree $ show . fst <$> buildCSSTree css

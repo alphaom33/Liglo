@@ -1,11 +1,9 @@
-{-# OPTIONS_GHC -Wno-incomplete-patterns #-}
 {-# OPTIONS_GHC -Wno-incomplete-uni-patterns #-}
 {-# LANGUAGE FlexibleInstances #-}
+{-# OPTIONS_GHC -Wno-orphans #-}
 module CSSParser where
 
 import CSSTokenizer
-import HTMLParser (tracer)
-import Debug.Trace
 
 import Data.List.Split
 
@@ -117,14 +115,6 @@ killrest = go 1
                 else go (count - 1) state
             | otherwise = go count state
 
-matchStar :: Eq a => [a] -> [a] -> Bool
-matchStar s v = go v (length v - length s)
-    where
-        go v num
-            | num < 0 = False
-            | s == take (length s) v = True
-            | otherwise = go (drop 1 v) (num - 1)
-
 matchspaced :: [Char] -> [Char] -> Bool
 matchspaced s = elem s . splitOn " "
 
@@ -151,7 +141,7 @@ parseTokenList _out _currentList _tokens = map (ackackack [] [] . reverse) $ go 
         go out [] [] = reverse out
         go out currentList [] = go (currentList : out) [] []
 
-        go out currentList (ColonToken : IdentToken pseudoClass : tokens) = if pseudoClass `elem` ["link"]
+        go out currentList (ColonToken : IdentToken pseudoClass : tokens) = if pseudoClass == "link"
             then go out currentList tokens
             else go out [] (drop 1 $ dropWhile (/= CommaToken) tokens)
         go out currentList (ColonToken : ColonToken : IdentToken _ : tokens) = go out currentList tokens
@@ -166,7 +156,7 @@ parseTokenList _out _currentList _tokens = map (ackackack [] [] . reverse) $ go 
                     let
                         (selector, rest) = matchSelector css
                         (combinator, rest') = matchCombinator rest
-                    in 
+                    in
                         go out ((combinator, selector) : currentList) rest'
                 addCurrentList = currentList : out
 
@@ -183,16 +173,16 @@ parseTokenList _out _currentList _tokens = map (ackackack [] [] . reverse) $ go 
 
             (DelimToken '*' : rest) -> (StarSelector, rest)
 
-            (ColonToken : FunctionToken "where" : tokens) -> 
+            (ColonToken : FunctionToken "where" : tokens) ->
                 let (yep, rest) = getFunction tokens
                 in (OrSelector yep, rest)
 
             -- TODO is should add specificity
-            (ColonToken : FunctionToken "is" : tokens) -> 
+            (ColonToken : FunctionToken "is" : tokens) ->
                 let (yep, rest) = getFunction tokens
                 in (OrSelector yep, rest)
 
-            (ColonToken : FunctionToken "not" : tokens) -> 
+            (ColonToken : FunctionToken "not" : tokens) ->
                 let (yep, rest) = getFunction tokens
                 in (NotSelector $ OrSelector yep, rest)
 
@@ -220,8 +210,9 @@ parseTokenList _out _currentList _tokens = map (ackackack [] [] . reverse) $ go 
                         (IdentToken "s" : _) -> finish attr check
                         (IdentToken "S" : _) -> finish attr check
                         _ -> finish attr check
-                        where 
+                        where
                             finish attr' check' = (AttrSelector attr' check', rest')
+
 
             (nextToken : rest) -> (tokenToSelector nextToken, rest)
 
@@ -229,6 +220,15 @@ parseTokenList _out _currentList _tokens = map (ackackack [] [] . reverse) $ go 
             (IdentToken n) -> TagSelector n
             (ClassToken n) -> ClassSelector n
             (HashToken (_, n)) -> HashSelector n
+
+matchStar :: Eq a => [a] -> [a] -> Bool
+matchStar tokens against = go against (length against - length tokens)
+    where
+        go v num
+            | num < 0 = False
+            | tokens == take (length tokens) v = True
+            | otherwise = go (drop 1 v) (num - 1)
+
 
 matchCombinator :: [CSSToken] -> (Combinator, [CSSToken])
 matchCombinator [] = (CurrentCombinator, [])
@@ -241,7 +241,7 @@ matchCombinator tokens = (getCombinator, rest)
             | otherwise = CurrentCombinator
 
         (rest, eatWhitten) = eatWhite tokens
-        
+
         eatWhite :: [CSSToken] -> ([CSSToken], [CSSToken])
         eatWhite [] = ([], [EOFToken])
         eatWhite (WhitespaceToken : rest') = (WhitespaceToken :) <$> eatWhite rest'
@@ -299,19 +299,20 @@ consumeDeclaration s = if nextInputToken == ColonToken
         ((IdentToken name):state) = s
         (nextInputToken:state') = eatWhitespace state
 
-        eatWhitespace state = if nextInputToken == WhitespaceToken
-            then eatWhitespace state'
+        eatWhitespace whitespaceState = if whiteSpaceNextInputToken == WhitespaceToken
+            then eatWhitespace whitespaceState' 
             else state
-            where (nextInputToken:state') = state
+            where (whiteSpaceNextInputToken:whitespaceState' ) = whitespaceState
 
         eatVals :: [ComponentValue] -> [CSSToken] -> ([ComponentValue], [CSSToken])
-        eatVals vals state = if nextInputToken == EOFToken
-            then (vals, state)
-            else let (val, state'') = consumeComponentValue state in eatVals (val:vals) state''
-            where (nextInputToken:state') = state
+        eatVals vals valsState = if valsNextInputToken == EOFToken
+            then (vals, valsState)
+            else let (val, valsState'') = consumeComponentValue valsState in eatVals (val:vals) valsState''
+            where (valsNextInputToken:_) = valsState
 
         declar val imp = Declaration {declarationName=name, declarationValue=reverse val, declarationImportant=imp}
 
+killUnknown :: [CSSToken] -> [CSSToken]
 killUnknown state = if nextInputToken `elem` [SemicolonToken, EOFToken]
     then killUnknown $ snd $ consumeComponentValue state
     else state'
@@ -319,12 +320,12 @@ killUnknown state = if nextInputToken `elem` [SemicolonToken, EOFToken]
         (nextInputToken:state') = state
 
 consumeIdent :: [CSSToken] -> (Maybe Declaration, [CSSToken])
-consumeIdent state = go [] state
+consumeIdent = go []
     where
         go :: [CSSToken] -> [CSSToken] -> (Maybe Declaration, [CSSToken])
         go tokens state = if nextInputToken `elem` [SemicolonToken, EOFToken]
             then let (val, _) = consumeDeclaration $ reverse (EOFToken:tokens) in case val of
-                (Just val) -> (Just val, state)
+                (Just val') -> (Just val', state)
                 Nothing -> (Nothing, state')
             else go (nextInputToken:tokens) state'
             where (nextInputToken:state') = state
@@ -340,7 +341,7 @@ consumeListOfDeclarations = go []
             EOFToken -> (list, state)
             (AtKeywordToken _) -> let (val, state'') = consumeAtRule state in go (val:list) state''
             (IdentToken _) -> let (val, state'') = consumeIdent state in case val of
-                (Just val) -> go (DeclarationValue val:list) state''
+                (Just val') -> go (DeclarationValue val':list) state''
                 Nothing -> go list state''
             _ -> go list $ killUnknown state
             where
@@ -369,7 +370,7 @@ outList out delim (val:rest) = outList (out ++ (case val of
     (PreservedValue (NumberToken n)) -> show n
     (PreservedValue (DimensionToken (n, d))) -> show n ++ d
     (PreservedValue (PercentageToken n)) -> show n ++ "%"
-    (PreservedValue (HashToken (id, n))) -> "#" ++ n
+    (PreservedValue (HashToken (_, n))) -> "#" ++ n
     (SimpleBlockValue (SimpleCurlyBlock (CurlyBlock t c))) -> foldr (\ ss -> (outList "" "" (map (SelectorValue . snd) ss) ++) . (", " ++)) "" t ++ " {\n" ++ replaceAll "\n" "\n\t" (outList "\t" "" c) ++ "}\n\n"
     (SimpleBlockValue (SimpleSquareBlock (SquareBlock c))) -> "[" ++ outList "" "" c ++ "]"
     (SimpleBlockValue (SimpleParenthesisBlock (ParenthesisBlock c))) -> "(" ++ outList "" "" c ++ ")"

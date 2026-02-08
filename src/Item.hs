@@ -16,7 +16,7 @@ data Item = Item {
 instance ToJSON Item
 instance FromJSON Item where
   parseJSON = withObject "Item" $ \ obj -> do
-    title <- obj .: "title"
-    link <- obj .: "link"
-    snippet <- obj .:? "snippet"
-    return (Item {title=title, link=link, snippet=fromMaybe "" snippet})
+    _title <- obj .: "title"
+    _link <- obj .: "link"
+    _snippet <- obj .:? "snippet"
+    return (Item {title=_title, link=_link, snippet=fromMaybe "" _snippet})

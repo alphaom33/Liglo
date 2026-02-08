@@ -729,4 +729,3 @@ _parseString :: State -> State
 _parseString state = if _lastEmitted state /= EOF
     then _parseString $ doStateMachine state
     else state
-
