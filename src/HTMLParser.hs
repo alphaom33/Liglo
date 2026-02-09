@@ -708,9 +708,14 @@ doStateMachine state = case _stateMachineState state of
             in (rest, map toLower first == map toLower w)
 
 
+killCommentsWhat :: State -> State
+killCommentsWhat = over emitted $ filter $ \case
+    (CommentToken _) -> False
+    _ -> True
+
 parseString :: String -> State
 parseString str =
-    over emitted reverse $ _parseString State {
+    killCommentsWhat $ over emitted reverse $ _parseString State {
         _stateMachineState = DataState
         , _returnState = DataState
         , _input = preProcess str ++ "\xfffa"

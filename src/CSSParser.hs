@@ -11,6 +11,8 @@ import Data.Map ((!), fromList)
 import Data.Char (toLower)
 import Data.Maybe (fromMaybe)
 import Data.List (intersect)
+import Debug.Trace (trace)
+import HTMLParser (tracer)
 
 type AttrNess = (Maybe String -> Bool)
 instance Show AttrNess where
@@ -95,11 +97,12 @@ consumeComponentValue = go []
             OpeningCurlyBracketToken -> consumeSimpleBlock (reverse tokens) state
             -- OpeningSquareBracketToken -> consumeSimpleBlock (reverse tokens) state
             OpeningParenthesisToken -> consumeSimpleBlock (reverse tokens) state
-            -- (FunctionToken _) -> consumeFunction state
+            (FunctionToken _) -> consumeFunction state
             (AtKeywordToken _) -> consumeAtRule state
-            _ -> if nextnextInputToken == EOFToken
-                then (PreservedValue nextInputToken, state')
-                else go (PreservedValue nextInputToken : tokens) state'
+            _ -> case nextnextInputToken of
+                EOFToken -> (PreservedValue nextInputToken, state')
+                WhitespaceToken -> go tokens state'
+                _ -> go (PreservedValue nextInputToken : tokens) state'
             where
                 (nextInputToken:state') = state
                 (nextnextInputToken:_) = state'
@@ -202,6 +205,7 @@ parseTokenList _out _currentList _tokens = map (ackackack [] [] . reverse) $ go 
                 where
                     (rest', square) = eatSquare rest
 
+                    getAttrSelector check (IdentToken against : rest'') = addAttrSelector (check against . fromMaybe "") rest''
                     getAttrSelector check (StringToken against : rest'') = addAttrSelector (check against . fromMaybe "") rest''
 
                     addAttrSelector check rest'' = case rest'' of
@@ -220,6 +224,7 @@ parseTokenList _out _currentList _tokens = map (ackackack [] [] . reverse) $ go 
             (IdentToken n) -> TagSelector n
             (ClassToken n) -> ClassSelector n
             (HashToken (_, n)) -> HashSelector n
+            _ -> trace ("Unkown token: " ++ show nextToken) StarSelector
 
 matchStar :: Eq a => [a] -> [a] -> Bool
 matchStar tokens against = go against (length against - length tokens)
@@ -237,6 +242,8 @@ matchCombinator tokens = (getCombinator, rest)
         getCombinator
             | not $ null $ [EOFToken, CommaToken] `intersect` eatWhitten = CurrentCombinator
             | DelimToken '>' `elem` eatWhitten = ChildCombinator
+            | DelimToken '~' `elem` eatWhitten = ChildCombinator -- TODO SubsequentSiblingCombinator
+            | DelimToken '+' `elem` eatWhitten = ChildCombinator -- TODO SiblingCombinator
             | WhitespaceToken `elem` eatWhitten = DescendantCombinator
             | otherwise = CurrentCombinator
 
@@ -246,6 +253,8 @@ matchCombinator tokens = (getCombinator, rest)
         eatWhite [] = ([], [EOFToken])
         eatWhite (WhitespaceToken : rest') = (WhitespaceToken :) <$> eatWhite rest'
         eatWhite (DelimToken '>' : rest') = (rest', [DelimToken '>'])
+        eatWhite (DelimToken '~' : rest') = (rest', [DelimToken '~'])
+        eatWhite (DelimToken '+' : rest') = (rest', [DelimToken '+'])
         eatWhite (next : rest') = (next:rest', [next])
 
 consumeSimpleBlock :: [ComponentValue] -> [CSSToken] -> (ComponentValue, [CSSToken])
@@ -297,18 +306,19 @@ consumeDeclaration s = if nextInputToken == ColonToken
     else (Nothing, nextInputToken:state')
     where
         ((IdentToken name):state) = s
-        (nextInputToken:state') = eatWhitespace state
+        (nextInputToken:state') = state
 
         eatWhitespace whitespaceState = if whiteSpaceNextInputToken == WhitespaceToken
             then eatWhitespace whitespaceState' 
-            else state
-            where (whiteSpaceNextInputToken:whitespaceState' ) = whitespaceState
+            else whitespaceState
+            where (whiteSpaceNextInputToken:whitespaceState') = whitespaceState
 
         eatVals :: [ComponentValue] -> [CSSToken] -> ([ComponentValue], [CSSToken])
-        eatVals vals valsState = if valsNextInputToken == EOFToken
-            then (vals, valsState)
-            else let (val, valsState'') = consumeComponentValue valsState in eatVals (val:vals) valsState''
-            where (valsNextInputToken:_) = valsState
+        eatVals vals valsState = case valsNextInputToken of
+            EOFToken -> (vals, valsState)
+            WhitespaceToken -> eatVals vals valsState'
+            _ -> let (val, valsState'') = consumeComponentValue valsState in eatVals (val:vals) valsState''
+            where (valsNextInputToken:valsState') = valsState
 
         declar val imp = Declaration {declarationName=name, declarationValue=reverse val, declarationImportant=imp}
 

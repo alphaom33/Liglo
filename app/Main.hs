@@ -17,6 +17,7 @@ import qualified CSSTokenizer
 import qualified CSSParser
 import Mortar
 import StyleStealer
+import Network.HTTP.Client (Request(requestHeaders))
 
 searchMain :: IO ()
 searchMain = do
@@ -36,8 +37,8 @@ searchMain = do
     let finalURL = SearchApp._curQuery finalState
     writeFile "test.url" finalURL
 
-    request <- parseRequest finalURL
-    response <- httpLBS request
+    request <- parseRequest finalURL 
+    response <- httpLBS $ request {requestHeaders=[("user-agent", "Mozilla/5.0 (Windows NT 6.1; Win64; x64; rv:47.0) Gecko/20100101 Firefox/47.0")]}
     let html = unpack (getResponseBody response)
     writeFile "test.html" html
     let result = _emitted $ parseString html

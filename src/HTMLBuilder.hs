@@ -14,13 +14,13 @@ import Data.Tree
 import Lens.Micro.TH (makeLenses)
 import Lens.Micro (set, over, ASetter)
 
-import HTMLParser (Token(..), Tag, Attribute(..), _opening, _tagName, _attrs)
+import HTMLParser (Token(..), Tag, Attribute(..), _opening, _tagName, _attrs, tracer)
 import CSSParser
 import CSSTokenizer
 import qualified Mortar
 
 import CharacterReferences
-import Mortar (wrapWords, escapeLength)
+import Debug.Trace (trace)
 
 type CSSAttribute = TextState -> TextState
 instance Show CSSAttribute where
@@ -268,10 +268,10 @@ outputTable mhm = tableIt $ bottomed vHeight broken
 
         bData = _tBuilderData mhm
         hWidth = fst (_size bData) `div` length (head $ _tOut mhm)
-        space e = replicate (hWidth - escapeLength (reverse e)) ' '
+        space e = replicate (hWidth - Mortar.escapeLength (reverse e)) ' '
 
         broken :: [[[String]]]
-        broken = map (map (foldr ((\ x a -> splitOn "\n" x ++ a) . reverse) [] . wrapWords hWidth . reverse . dropWhile (== '\n'))) $ _tOut mhm
+        broken = map (map (foldr ((\ x a -> splitOn "\n" x ++ a) . reverse) [] . Mortar.wrapWords hWidth . reverse . dropWhile (== '\n'))) $ _tOut mhm
         vHeight = map (maximum . map length) broken
 
         bottomed :: [Int] -> [[[String]]] -> [[String]]
@@ -355,6 +355,7 @@ parseColor v = case v of
             b = read $ "0x" ++ drop 4 enned
         in (r, g, b)
     [PreservedValue (IdentToken n)] -> colorNameToColor M.! n
+    _ -> trace ("Unknown color: " ++ show v) (0, 0, 0)
     where
         overColor f (r, g, b) = (f r, f g, f b)
 
@@ -393,29 +394,43 @@ parseDecleretiens ds out = case ds of
                 [PreservedValue (IdentToken "inline-block")] -> set display Inline
                 [PreservedValue (IdentToken "inline-table")] -> set display Inline
                 [PreservedValue (IdentToken "none")] -> set real False
-                _ -> id
+                _ -> traceUnknown
             "position" -> case vs of
                 [PreservedValue (IdentToken "relative")] -> set real True
                 _ -> set real False
             "float" -> case vs of
                 [PreservedValue (IdentToken "none")] -> set real True
                 _ -> set real False
-            "color" -> set foregroundColor $ parseColor vs
-            "background" -> set backgroundColor $ if vs == [PreservedValue (IdentToken "transparent")]
-                then Nothing
-                else Just $ parseColor vs
-            "background-color" -> set backgroundColor $ Just $ parseColor vs
+            "color" -> case vs of
+                [PreservedValue (IdentToken "default")] -> set foregroundColor (0, 0, 0) 
+                _ -> doColor $ set foregroundColor $ parseColor vs
+            "background" -> doColor doBackground
+            "background-color" -> doColor doBackground
             "font-weight" -> case vs of
                 [PreservedValue (IdentToken "bold")] -> set bold True
                 [PreservedValue (IdentToken "normal")] -> set bold False
+                _ -> traceUnknown
             "font-style" -> case vs of
                 [PreservedValue (IdentToken "italic")] -> set italicized True
                 [PreservedValue (IdentToken "normal")] -> set italicized False
+                _ -> traceUnknown
             "text-decoration" -> case vs of
                 [PreservedValue (IdentToken "underline")] -> set underlined True
                 [PreservedValue (IdentToken "line-through")] -> set struckthrough True
                 [PreservedValue (IdentToken "none")] -> set struckthrough False . set underlined False
+                _ -> traceUnknown
             _ -> id
+            where
+                doColor normal = if vs == [PreservedValue (IdentToken "inherit")]
+                    then id
+                    else normal
+
+                doBackground = set backgroundColor $ case vs of
+                    [PreservedValue (IdentToken "transparent")] -> Nothing
+                    [PreservedValue (IdentToken "initial")] -> Just (255, 255, 255)
+                    _ -> Just $ parseColor vs
+
+                traceUnknown = trace ("Unknown " ++ n ++ ": " ++ show vs) id
         _ -> out
 
 buildCSSTree :: [ComponentValue] -> CSSTree
