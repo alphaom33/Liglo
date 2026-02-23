@@ -345,6 +345,10 @@ parseColor v = case v of
         [PreservedValue (NumberToken r), PreservedValue (NumberToken g), PreservedValue (NumberToken b)] -> (round r, round g, round b)
     [FunctionValue ("hsl", comps)] -> case parseFuncValue comps of
         [PreservedValue (NumberToken h), PreservedValue (NumberToken s), PreservedValue (NumberToken l)] -> overColor round $ hslToRgb (h, s, l)
+    [FunctionValue ("var", comps)] -> case parseFuncValue comps of
+        (PreservedValue (DelimToken '-'):PreservedValue (DelimToken '-'):PreservedValue (IdentToken _):rest) -> case rest of
+            [PreservedValue (HashToken _)] -> parseColor rest
+            _ -> trace "ahhhhhhh" (0, 0, 0)
     [PreservedValue (HashToken (_, n))] ->
         let
             enned = if length n == 3
