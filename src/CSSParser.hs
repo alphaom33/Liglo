@@ -99,10 +99,9 @@ consumeComponentValue = go []
             OpeningParenthesisToken -> consumeSimpleBlock (reverse tokens) state
             (FunctionToken _) -> consumeFunction state
             (AtKeywordToken _) -> consumeAtRule state
-            _ -> case nextnextInputToken of
-                EOFToken -> (PreservedValue nextInputToken, state')
-                WhitespaceToken -> go tokens state'
-                _ -> go (PreservedValue nextInputToken : tokens) state'
+            _ -> if nextnextInputToken == EOFToken
+                then (PreservedValue nextInputToken, state')
+                else go (PreservedValue nextInputToken : tokens) state'
             where
                 (nextInputToken:state') = state
                 (nextnextInputToken:_) = state'
